@@ -1,0 +1,52 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "release",
+      "displayName": "Release Native",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "MATCHING_ENGINE_NATIVE": "ON"
+      }
+    },
+    {
+      "name": "release-portable",
+      "displayName": "Release Portable",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/release-portable",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "MATCHING_ENGINE_NATIVE": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "release-portable",
+      "configurePreset": "release-portable"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "release-portable",
+      "configurePreset": "release-portable",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}
+

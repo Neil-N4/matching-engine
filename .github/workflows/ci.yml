@@ -1,0 +1,26 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake --preset release-portable
+
+      - name: Build
+        run: cmake --build --preset release-portable -j 2
+
+      - name: Test
+        run: ctest --preset release-portable
+
+      - name: Benchmark smoke test
+        run: ./build/release-portable/engine_bench
+
