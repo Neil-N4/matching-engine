@@ -12,8 +12,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtest-dev
+
       - name: Configure
-        run: cmake --preset release-portable
+        run: cmake --preset release-portable -DMATCHING_ENGINE_REQUIRE_GTEST=ON
 
       - name: Build
         run: cmake --build --preset release-portable -j 2
@@ -23,4 +28,3 @@ jobs:
 
       - name: Benchmark smoke test
         run: ./build/release-portable/engine_bench
-

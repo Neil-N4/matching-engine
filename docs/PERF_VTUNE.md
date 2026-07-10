@@ -20,7 +20,7 @@ cmake --build --preset release-portable
 
 ## Linux perf
 
-Record call graphs for the synthetic order-to-fill benchmark:
+Record call graphs for the benchmark suite:
 
 ```sh
 perf stat -d ./build/profile/engine_bench
@@ -53,5 +53,12 @@ vtune -report summary -result-dir vtune-uarch
 
 ## Interpreting Results
 
-The default benchmark preloads one ask FIFO level and repeatedly submits market buys for one share. That isolates order-to-fill pointer mutation and avoids making every sample pay for best-price rescans. A separate scenario should be added when evaluating worst-case price-level churn.
+The standalone benchmark prints one line per scenario:
+
+- `hot_fifo_fill`: preloads one ask FIFO level and repeatedly submits market buys for one share. This isolates order-to-fill pointer mutation.
+- `add_cancel_churn`: repeatedly adds and cancels unique order IDs across rotating prices. This stresses fixed hash-table deletion and best-level maintenance.
+- `itch_add_decode`: parses NASDAQ ITCH add-order frames from a fixed message ring.
+- `alpha_signal_quote`: computes VPIN/OBI/micro-price and an Avellaneda-Stoikov quote.
+
+Fast parser and alpha scenarios are batched internally before reporting per-op median and p99, which avoids timer granularity showing false `0ns` medians.
 

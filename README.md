@@ -18,6 +18,16 @@ ctest --test-dir build --output-on-failure
 
 The default compiler flags include `-O3`, `-march=native`, `-fno-exceptions`, and `-fno-rtti` on GCC/Clang-compatible compilers.
 
+## Tests
+
+The project always builds a dependency-free CTest harness. If GTest is installed, CMake also builds the `matching_engine_gtests` target.
+
+```sh
+ctest --test-dir build --output-on-failure
+```
+
+CI installs GTest and configures with `MATCHING_ENGINE_REQUIRE_GTEST=ON`, so the richer GoogleTest suite is required on GitHub Actions.
+
 ## Run
 
 ```sh
@@ -25,5 +35,10 @@ The default compiler flags include `-O3`, `-march=native`, `-fno-exceptions`, an
 ./build/engine_bench
 ```
 
-If Google Benchmark is installed, the benchmark target links against it. Otherwise it builds a standalone latency harness with median and p99 reporting.
+If Google Benchmark is installed, the benchmark target links against it. Otherwise it builds a standalone latency harness that reports median, p99, and throughput for hot FIFO fills, add/cancel churn, ITCH decode, and alpha quote generation.
 
+More detail:
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [Testing](docs/TESTING.md)
+- [Perf and VTune](docs/PERF_VTUNE.md)
