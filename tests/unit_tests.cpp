@@ -171,6 +171,13 @@ bool test_order_book() {
     top = book.top_of_book();
     REQUIRE(top.best_ask == 103u);
     REQUIRE(top.best_ask_quantity == 18u);
+
+    const me::ExecutionReport duplicate = book.submit_limit_order(1u, me::Side::Buy, 103u, 5u);
+    REQUIRE(duplicate.status == me::BookStatus::Duplicate);
+    REQUIRE(duplicate.filled_quantity == 0u);
+    top = book.top_of_book();
+    REQUIRE(top.best_ask == 103u);
+    REQUIRE(top.best_ask_quantity == 18u);
     return true;
 }
 
@@ -230,4 +237,3 @@ int main() {
     std::cout << "all tests passed\n";
     return 0;
 }
-

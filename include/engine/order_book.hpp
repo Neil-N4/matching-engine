@@ -451,6 +451,10 @@ public:
             report.status = BookStatus::InvalidQuantity;
             return report;
         }
+        if (orders_.find(id) != nullptr) [[unlikely]] {
+            report.status = BookStatus::Duplicate;
+            return report;
+        }
 
         while (quantity > 0u && crosses(side, price)) {
             PriceLevel* const level = best_level(opposite(side));
@@ -657,4 +661,3 @@ private:
 };
 
 }  // namespace me
-

@@ -11,6 +11,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(MATCHING_ENGINE_NATIVE "Enable -march=native when supported" ON)
 option(MATCHING_ENGINE_TESTS "Build unit tests" ON)
+option(MATCHING_ENGINE_GTEST "Build GoogleTest coverage when GTest is available" ON)
 option(MATCHING_ENGINE_BENCHMARKS "Build benchmark target" ON)
 
 add_library(matching_engine_headers INTERFACE)
@@ -42,6 +43,20 @@ if(MATCHING_ENGINE_TESTS)
     add_executable(matching_engine_tests tests/unit_tests.cpp)
     target_link_libraries(matching_engine_tests PRIVATE matching_engine_headers)
     add_test(NAME matching_engine_tests COMMAND matching_engine_tests)
+
+    if(MATCHING_ENGINE_GTEST)
+        find_package(GTest QUIET)
+        if(GTest_FOUND)
+            include(GoogleTest)
+            add_executable(matching_engine_gtests tests/gtest_tests.cpp)
+            target_link_libraries(matching_engine_gtests PRIVATE
+                matching_engine_headers
+                GTest::gtest_main)
+            gtest_discover_tests(matching_engine_gtests)
+        else()
+            message(STATUS "GTest not found; skipping matching_engine_gtests")
+        endif()
+    endif()
 endif()
 
 if(MATCHING_ENGINE_BENCHMARKS)
@@ -54,4 +69,3 @@ if(MATCHING_ENGINE_BENCHMARKS)
         target_link_libraries(engine_bench PRIVATE benchmark::benchmark)
     endif()
 endif()
-
