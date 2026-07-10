@@ -62,6 +62,12 @@ enum class EntryState : std::uint8_t {
 }
 
 template <std::size_t Capacity>
+[[nodiscard]] inline std::size_t probe_distance(const std::size_t home,
+                                                const std::size_t slot) noexcept {
+    return (slot + Capacity - home) & (Capacity - 1u);
+}
+
+template <std::size_t Capacity>
 class alignas(64) OrderDirectory {
     static_assert((Capacity & (Capacity - 1u)) == 0u, "OrderDirectory capacity must be a power of two");
 
@@ -112,33 +118,20 @@ public:
         }
 
         std::size_t idx = mix_u64(id) & (Capacity - 1u);
-        std::size_t first_tombstone = Capacity;
 
         for (std::size_t probe = 0; probe < Capacity; ++probe) {
             Entry& entry = table_[idx];
             if (entry.state == EntryState::Occupied && entry.key == id) [[unlikely]] {
                 return BookStatus::Duplicate;
             }
-            if (entry.state == EntryState::Tombstone && first_tombstone == Capacity) {
-                first_tombstone = idx;
-            }
             if (entry.state == EntryState::Empty) {
-                const std::size_t target = first_tombstone == Capacity ? idx : first_tombstone;
-                table_[target].key = id;
-                table_[target].value = order;
-                table_[target].state = EntryState::Occupied;
+                entry.key = id;
+                entry.value = order;
+                entry.state = EntryState::Occupied;
                 ++occupied_;
                 return BookStatus::Accepted;
             }
             idx = (idx + 1u) & (Capacity - 1u);
-        }
-
-        if (first_tombstone != Capacity) {
-            table_[first_tombstone].key = id;
-            table_[first_tombstone].value = order;
-            table_[first_tombstone].state = EntryState::Occupied;
-            ++occupied_;
-            return BookStatus::Accepted;
         }
 
         return BookStatus::OrderDirectoryFull;
@@ -149,8 +142,7 @@ public:
         for (std::size_t probe = 0; probe < Capacity; ++probe) {
             Entry& entry = table_[idx];
             if (entry.state == EntryState::Occupied && entry.key == id) [[likely]] {
-                entry.value = nullptr;
-                entry.state = EntryState::Tombstone;
+                erase_at(idx);
                 --occupied_;
                 return true;
             }
@@ -164,6 +156,22 @@ public:
 
     [[nodiscard]] inline std::size_t size() const noexcept {
         return occupied_;
+    }
+
+private:
+    inline void erase_at(std::size_t hole) noexcept {
+        std::size_t idx = (hole + 1u) & (Capacity - 1u);
+
+        while (table_[idx].state == EntryState::Occupied) {
+            const std::size_t home = mix_u64(table_[idx].key) & (Capacity - 1u);
+            if (probe_distance<Capacity>(home, hole) < probe_distance<Capacity>(home, idx)) {
+                table_[hole] = table_[idx];
+                hole = idx;
+            }
+            idx = (idx + 1u) & (Capacity - 1u);
+        }
+
+        table_[hole] = Entry{};
     }
 };
 
