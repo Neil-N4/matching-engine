@@ -10,6 +10,7 @@
 #include "engine/order_book.hpp"
 #include "engine/parser.hpp"
 #include "strategy/avellaneda_stoikov.hpp"
+#include "strategy/risk.hpp"
 
 namespace {
 
@@ -220,6 +221,65 @@ bool test_alpha_and_strategy() {
     return true;
 }
 
+bool test_risk_controller() {
+    me::strategy::RiskConfig config{};
+    config.max_abs_inventory = 100;
+    config.soft_abs_inventory = 60;
+    config.base_quote_quantity = 40u;
+    config.max_quote_quantity = 50u;
+    config.max_gross_notional = 1'000'000u;
+    config.max_drawdown_ticks = 500;
+    config.toxicity_pause_zscore = 2.0;
+
+    const me::strategy::RiskController risk(config);
+    const me::strategy::Quote quote{100.0, 99.95, 100.05, 0.10, 1.0};
+    me::alpha::FeatureFrame frame{};
+    frame.vpin = 0.3;
+    frame.vpin_mean = 0.3;
+    frame.vpin_sigma = 0.1;
+
+    me::strategy::RiskState state{};
+    me::strategy::RiskDecision decision = risk.evaluate(quote, frame, state);
+    REQUIRE(decision.action == me::strategy::RiskAction::QuoteBoth);
+    REQUIRE(decision.reason == me::strategy::RiskReason::None);
+    REQUIRE(decision.bid_quantity == 40u);
+    REQUIRE(decision.ask_quantity == 40u);
+
+    state.inventory = 100;
+    decision = risk.evaluate(quote, frame, state);
+    REQUIRE(decision.action == me::strategy::RiskAction::AskOnly);
+    REQUIRE(decision.reason == me::strategy::RiskReason::InventoryLimit);
+    REQUIRE(decision.bid_quantity == 0u);
+    REQUIRE(decision.ask_quantity == 40u);
+
+    state.inventory = 80;
+    decision = risk.evaluate(quote, frame, state);
+    REQUIRE(decision.action == me::strategy::RiskAction::QuoteBoth);
+    REQUIRE(decision.bid_quantity == 20u);
+    REQUIRE(decision.ask_quantity == 40u);
+
+    state.inventory = 0;
+    frame.vpin = 0.8;
+    decision = risk.evaluate(quote, frame, state);
+    REQUIRE(decision.action == me::strategy::RiskAction::PullQuotes);
+    REQUIRE(decision.reason == me::strategy::RiskReason::ToxicFlow);
+
+    frame.vpin = 0.3;
+    state.peak_pnl_ticks = 1'000;
+    state.realized_pnl_ticks = 400;
+    decision = risk.evaluate(quote, frame, state);
+    REQUIRE(decision.action == me::strategy::RiskAction::KillSwitch);
+    REQUIRE(decision.reason == me::strategy::RiskReason::DrawdownLimit);
+
+    state.peak_pnl_ticks = 0;
+    state.realized_pnl_ticks = 0;
+    state.gross_notional = 1'000'000u;
+    decision = risk.evaluate(quote, frame, state);
+    REQUIRE(decision.action == me::strategy::RiskAction::PullQuotes);
+    REQUIRE(decision.reason == me::strategy::RiskReason::NotionalLimit);
+    return true;
+}
+
 }  // namespace
 
 int main() {
@@ -228,7 +288,8 @@ int main() {
         test_ring() &&
         test_parser() &&
         test_order_book() &&
-        test_alpha_and_strategy();
+        test_alpha_and_strategy() &&
+        test_risk_controller();
 
     if (!ok) {
         return 1;

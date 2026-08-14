@@ -8,6 +8,7 @@
 #include "engine/order_book.hpp"
 #include "engine/parser.hpp"
 #include "strategy/avellaneda_stoikov.hpp"
+#include "strategy/risk.hpp"
 
 namespace {
 
@@ -158,3 +159,76 @@ TEST(Strategy, WidensQuoteWhenVpinZScoreIsPositive) {
     EXPECT_GT(toxic_quote.toxicity_multiplier, 1.0);
 }
 
+TEST(RiskController, ScalesAndRestrictsQuotesByInventory) {
+    me::strategy::RiskConfig config{};
+    config.max_abs_inventory = 100;
+    config.soft_abs_inventory = 60;
+    config.base_quote_quantity = 40u;
+    config.max_quote_quantity = 50u;
+
+    const me::strategy::RiskController risk(config);
+    const me::strategy::Quote quote{100.0, 99.95, 100.05, 0.10, 1.0};
+    const me::alpha::FeatureFrame frame{};
+
+    me::strategy::RiskState state{};
+    state.inventory = 80;
+    me::strategy::RiskDecision decision = risk.evaluate(quote, frame, state);
+    EXPECT_EQ(decision.action, me::strategy::RiskAction::QuoteBoth);
+    EXPECT_EQ(decision.reason, me::strategy::RiskReason::None);
+    EXPECT_EQ(decision.bid_quantity, 20u);
+    EXPECT_EQ(decision.ask_quantity, 40u);
+
+    state.inventory = 100;
+    decision = risk.evaluate(quote, frame, state);
+    EXPECT_EQ(decision.action, me::strategy::RiskAction::AskOnly);
+    EXPECT_EQ(decision.reason, me::strategy::RiskReason::InventoryLimit);
+    EXPECT_EQ(decision.bid_quantity, 0u);
+    EXPECT_EQ(decision.ask_quantity, 40u);
+
+    state.inventory = -100;
+    decision = risk.evaluate(quote, frame, state);
+    EXPECT_EQ(decision.action, me::strategy::RiskAction::BidOnly);
+    EXPECT_EQ(decision.reason, me::strategy::RiskReason::InventoryLimit);
+    EXPECT_EQ(decision.bid_quantity, 40u);
+    EXPECT_EQ(decision.ask_quantity, 0u);
+}
+
+TEST(RiskController, PullsQuotesForToxicityNotionalAndDrawdown) {
+    me::strategy::RiskConfig config{};
+    config.max_gross_notional = 1'000u;
+    config.max_drawdown_ticks = 50;
+    config.toxicity_pause_zscore = 2.0;
+
+    const me::strategy::RiskController risk(config);
+    const me::strategy::Quote quote{100.0, 99.95, 100.05, 0.10, 1.0};
+
+    me::alpha::FeatureFrame frame{};
+    frame.vpin = 0.8;
+    frame.vpin_mean = 0.3;
+    frame.vpin_sigma = 0.1;
+
+    me::strategy::RiskState state{};
+    me::strategy::RiskDecision decision = risk.evaluate(quote, frame, state);
+    EXPECT_EQ(decision.action, me::strategy::RiskAction::PullQuotes);
+    EXPECT_EQ(decision.reason, me::strategy::RiskReason::ToxicFlow);
+
+    frame.vpin = 0.3;
+    state.gross_notional = 1'000u;
+    decision = risk.evaluate(quote, frame, state);
+    EXPECT_EQ(decision.action, me::strategy::RiskAction::PullQuotes);
+    EXPECT_EQ(decision.reason, me::strategy::RiskReason::NotionalLimit);
+
+    state.gross_notional = 0u;
+    state.peak_pnl_ticks = 100;
+    state.realized_pnl_ticks = 40;
+    decision = risk.evaluate(quote, frame, state);
+    EXPECT_EQ(decision.action, me::strategy::RiskAction::KillSwitch);
+    EXPECT_EQ(decision.reason, me::strategy::RiskReason::DrawdownLimit);
+
+    state.peak_pnl_ticks = 0;
+    state.realized_pnl_ticks = 0;
+    state.manual_kill = true;
+    decision = risk.evaluate(quote, frame, state);
+    EXPECT_EQ(decision.action, me::strategy::RiskAction::KillSwitch);
+    EXPECT_EQ(decision.reason, me::strategy::RiskReason::ManualKill);
+}
