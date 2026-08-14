@@ -31,7 +31,7 @@ struct RiskConfig {
     std::int32_t soft_abs_inventory{700};
     Qty base_quote_quantity{100};
     Qty max_quote_quantity{500};
-    std::uint64_t max_gross_notional{250'000'000u};
+    std::uint64_t max_gross_notional{50'000'000'000ULL};
     std::int64_t max_drawdown_ticks{50'000};
     double toxicity_pause_zscore{3.0};
 };
@@ -233,4 +233,3 @@ private:
 };
 
 }  // namespace me::strategy
-

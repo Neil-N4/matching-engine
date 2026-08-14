@@ -9,6 +9,7 @@
 #include "engine/order_book.hpp"
 #include "engine/parser.hpp"
 #include "strategy/avellaneda_stoikov.hpp"
+#include "strategy/risk.hpp"
 
 namespace {
 
@@ -120,9 +121,12 @@ void BM_ItchAddDecode(benchmark::State& state) {
     }
 }
 
-void BM_AlphaSignalAndQuote(benchmark::State& state) {
+void BM_AlphaSignalQuoteRisk(benchmark::State& state) {
     me::alpha::OnlineSignals<> signals;
     const me::strategy::AvellanedaStoikovMarketMaker maker{};
+    const me::strategy::RiskController risk{};
+    me::strategy::RiskState risk_state{};
+    risk_state.inventory = 25;
     me::MarketEvent event{};
     event.type = me::EventType::Execute;
     event.best_bid = kBidPrice;
@@ -136,7 +140,8 @@ void BM_AlphaSignalAndQuote(benchmark::State& state) {
         event.quantity = 200u + static_cast<me::Qty>(event.timestamp & 127u);
         const me::alpha::FeatureFrame frame = signals.on_event(event);
         const me::strategy::Quote quote = maker.quote(frame, 25, 0.5);
-        benchmark::DoNotOptimize(quote);
+        const me::strategy::RiskDecision decision = risk.evaluate(quote, frame, risk_state);
+        benchmark::DoNotOptimize(decision);
     }
 }
 
@@ -145,7 +150,7 @@ void BM_AlphaSignalAndQuote(benchmark::State& state) {
 BENCHMARK(BM_HotFifoFill);
 BENCHMARK(BM_AddCancelChurn);
 BENCHMARK(BM_ItchAddDecode);
-BENCHMARK(BM_AlphaSignalAndQuote);
+BENCHMARK(BM_AlphaSignalQuoteRisk);
 BENCHMARK_MAIN();
 
 #else
@@ -251,9 +256,12 @@ bool run_itch_add_decode() {
     });
 }
 
-bool run_alpha_signal_quote() {
+bool run_alpha_signal_quote_risk() {
     static me::alpha::OnlineSignals<> signals;
     static me::strategy::AvellanedaStoikovMarketMaker maker;
+    static me::strategy::RiskController risk;
+    me::strategy::RiskState risk_state{};
+    risk_state.inventory = 25;
     me::MarketEvent event{};
     event.type = me::EventType::Execute;
     event.best_bid = kBidPrice;
@@ -261,13 +269,15 @@ bool run_alpha_signal_quote() {
     event.best_bid_quantity = 6'000u;
     event.best_ask_quantity = 5'000u;
 
-    return run_scenario("alpha_signal_quote", kFastOpsPerSample, [&](const std::size_t i) noexcept {
+    return run_scenario("alpha_signal_quote_risk", kFastOpsPerSample, [&](const std::size_t i) noexcept {
         event.timestamp = static_cast<me::Timestamp>(i + 1u);
         event.side = (i & 1u) == 0u ? me::Side::Sell : me::Side::Buy;
         event.quantity = 200u + static_cast<me::Qty>(i & 127u);
         const me::alpha::FeatureFrame frame = signals.on_event(event);
         const me::strategy::Quote quote = maker.quote(frame, 25, 0.5);
-        return quote.ask_price > quote.bid_price;
+        const me::strategy::RiskDecision decision = risk.evaluate(quote, frame, risk_state);
+        return quote.ask_price > quote.bid_price &&
+               decision.action != me::strategy::RiskAction::KillSwitch;
     });
 }
 
@@ -278,7 +288,7 @@ int main() {
         run_hot_fifo_fill() &&
         run_add_cancel_churn() &&
         run_itch_add_decode() &&
-        run_alpha_signal_quote();
+        run_alpha_signal_quote_risk();
     return ok ? 0 : 1;
 }
 
