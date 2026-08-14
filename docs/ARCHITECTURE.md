@@ -29,3 +29,12 @@ The alpha thread consumes `MarketEvent` records and computes:
 ## Strategy
 
 `AvellanedaStoikovMarketMaker` computes reservation price and total spread from inventory, volatility, gamma, kappa, and time remaining. It widens spreads when VPIN exceeds its rolling baseline by positive z-score.
+
+`RiskController` sits after quote generation. It returns a `RiskDecision` with quote action and bid/ask sizes:
+
+- `QuoteBoth` under normal inventory, notional, PnL, and VPIN conditions.
+- `BidOnly` or `AskOnly` near hard inventory bounds.
+- `PullQuotes` for toxic VPIN z-scores, invalid quotes, or gross-notional breaches.
+- `KillSwitch` for manual kill or drawdown-limit breaches.
+
+The controller is scalar and header-only. It does not allocate, throw, or use string state; runtime labels are returned by fixed `const char*` helpers for logs and demo output.

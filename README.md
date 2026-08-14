@@ -1,12 +1,13 @@
 # L3 Matching Engine and Alpha Pipeline
 
-C++20 implementation of a Level 3 limit order book, NASDAQ ITCH 5.0 parser, lock-free telemetry path, online VPIN/imbalance/micro-price signals, and an adaptive Avellaneda-Stoikov market-making simulator.
+C++20 implementation of a Level 3 limit order book, NASDAQ ITCH 5.0 parser, lock-free telemetry path, online VPIN/imbalance/micro-price signals, an adaptive Avellaneda-Stoikov market-making simulator, and a quote-level risk gate.
 
 The hot path avoids heap allocation by using fixed-capacity, cache-line-aligned data structures:
 
 - `FixedSlabPool<T, N>` owns order nodes in pre-linked 64-byte chunks.
 - `LockFreeSPSC<T, N>` moves engine events to the alpha thread using atomic head/tail sequences.
 - The L3 book uses intrusive FIFO queues per price level plus fixed open-addressed tables for order and price lookup.
+- `RiskController` evaluates quote permissions and sizes from inventory, notional, drawdown, and VPIN toxicity state.
 
 ## Build
 
@@ -35,7 +36,7 @@ CI installs GTest and configures with `MATCHING_ENGINE_REQUIRE_GTEST=ON`, so the
 ./build/engine_bench
 ```
 
-If Google Benchmark is installed, the benchmark target links against it. Otherwise it builds a standalone latency harness that reports median, p99, and throughput for hot FIFO fills, add/cancel churn, ITCH decode, and alpha quote generation.
+If Google Benchmark is installed, the benchmark target links against it. Otherwise it builds a standalone latency harness that reports median, p99, and throughput for hot FIFO fills, add/cancel churn, ITCH decode, and alpha quote/risk generation.
 
 More detail:
 

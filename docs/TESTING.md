@@ -20,6 +20,7 @@ This runs `matching_engine_tests`, a small assertion-based harness covering:
 - OBI, micro-price, VPIN bucket accounting
 - atomic feature snapshots
 - VPIN-adaptive quote widening
+- risk-gate quote sizing, inventory limits, toxicity pause, drawdown kill switch, and notional limits
 
 ## GoogleTest
 
@@ -42,4 +43,3 @@ Run:
 ```
 
 The standalone benchmark reports scenario-level median, p99, and throughput. It is a smoke/perf regression tool, not a substitute for hardware-pinned `perf` or VTune profiling.
-
