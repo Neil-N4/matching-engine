@@ -8,6 +8,7 @@
 #include "engine/order_book.hpp"
 #include "engine/parser.hpp"
 #include "strategy/avellaneda_stoikov.hpp"
+#include "strategy/position.hpp"
 #include "strategy/risk.hpp"
 
 namespace {
@@ -231,4 +232,47 @@ TEST(RiskController, PullsQuotesForToxicityNotionalAndDrawdown) {
     decision = risk.evaluate(quote, frame, state);
     EXPECT_EQ(decision.action, me::strategy::RiskAction::KillSwitch);
     EXPECT_EQ(decision.reason, me::strategy::RiskReason::ManualKill);
+}
+
+TEST(PositionTracker, TracksLongRealizedAndUnrealizedPnl) {
+    me::strategy::PositionTracker tracker;
+
+    ASSERT_TRUE(tracker.on_fill({1u, me::Side::Buy, 100u, 10u}));
+    me::strategy::PositionSnapshot snap = tracker.snapshot(105u);
+    EXPECT_EQ(snap.inventory, 10);
+    EXPECT_EQ(snap.average_entry_price, 100u);
+    EXPECT_EQ(snap.realized_pnl_ticks, 0);
+    EXPECT_EQ(snap.unrealized_pnl_ticks, 50);
+    EXPECT_EQ(snap.total_pnl_ticks, 50);
+
+    ASSERT_TRUE(tracker.on_fill({2u, me::Side::Sell, 110u, 4u}));
+    snap = tracker.mark_to_market(105u);
+    EXPECT_EQ(snap.inventory, 6);
+    EXPECT_EQ(snap.realized_pnl_ticks, 40);
+    EXPECT_EQ(snap.unrealized_pnl_ticks, 30);
+    EXPECT_EQ(snap.total_pnl_ticks, 70);
+    EXPECT_EQ(snap.peak_pnl_ticks, 70);
+}
+
+TEST(PositionTracker, HandlesCrossingFromLongToShortAndExportsRiskState) {
+    me::strategy::PositionTracker tracker;
+
+    ASSERT_TRUE(tracker.on_fill({1u, me::Side::Buy, 100u, 10u}));
+    ASSERT_TRUE(tracker.on_fill({2u, me::Side::Sell, 110u, 4u}));
+    ASSERT_TRUE(tracker.on_fill({3u, me::Side::Sell, 90u, 10u}));
+
+    const me::strategy::PositionSnapshot snap = tracker.mark_to_market(95u);
+    EXPECT_EQ(snap.inventory, -4);
+    EXPECT_EQ(snap.average_entry_price, 90u);
+    EXPECT_EQ(snap.realized_pnl_ticks, -20);
+    EXPECT_EQ(snap.unrealized_pnl_ticks, -20);
+    EXPECT_EQ(snap.total_pnl_ticks, -40);
+    EXPECT_EQ(snap.drawdown_ticks, 110);
+
+    const me::strategy::RiskState risk_state = tracker.risk_state(95u);
+    EXPECT_EQ(risk_state.inventory, -4);
+    EXPECT_EQ(risk_state.gross_notional, 2'340u);
+    EXPECT_EQ(risk_state.realized_pnl_ticks, -20);
+    EXPECT_EQ(risk_state.unrealized_pnl_ticks, -20);
+    EXPECT_EQ(risk_state.peak_pnl_ticks, 70);
 }

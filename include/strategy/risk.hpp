@@ -40,6 +40,7 @@ struct RiskState {
     std::int32_t inventory{0};
     std::uint64_t gross_notional{0};
     std::int64_t realized_pnl_ticks{0};
+    std::int64_t unrealized_pnl_ticks{0};
     std::int64_t peak_pnl_ticks{0};
     bool manual_kill{false};
 };
@@ -179,10 +180,11 @@ private:
     }
 
     [[nodiscard]] static inline std::int64_t drawdown_ticks(const RiskState& state) noexcept {
-        if (state.peak_pnl_ticks <= state.realized_pnl_ticks) {
+        const std::int64_t total_pnl = state.realized_pnl_ticks + state.unrealized_pnl_ticks;
+        if (state.peak_pnl_ticks <= total_pnl) {
             return 0;
         }
-        return state.peak_pnl_ticks - state.realized_pnl_ticks;
+        return state.peak_pnl_ticks - total_pnl;
     }
 
     [[nodiscard]] static inline double toxicity_zscore(const alpha::FeatureFrame& frame) noexcept {

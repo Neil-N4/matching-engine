@@ -10,6 +10,7 @@
 #include "engine/order_book.hpp"
 #include "engine/parser.hpp"
 #include "strategy/avellaneda_stoikov.hpp"
+#include "strategy/position.hpp"
 #include "strategy/risk.hpp"
 
 namespace {
@@ -280,6 +281,48 @@ bool test_risk_controller() {
     return true;
 }
 
+bool test_position_tracker() {
+    me::strategy::PositionTracker tracker;
+
+    REQUIRE(tracker.on_fill({1u, me::Side::Buy, 100u, 10u}));
+    me::strategy::PositionSnapshot snap = tracker.snapshot(105u);
+    REQUIRE(snap.inventory == 10);
+    REQUIRE(snap.average_entry_price == 100u);
+    REQUIRE(snap.realized_pnl_ticks == 0);
+    REQUIRE(snap.unrealized_pnl_ticks == 50);
+    REQUIRE(snap.total_pnl_ticks == 50);
+    REQUIRE(snap.gross_notional == 1'000u);
+
+    REQUIRE(tracker.on_fill({2u, me::Side::Sell, 110u, 4u}));
+    snap = tracker.mark_to_market(105u);
+    REQUIRE(snap.inventory == 6);
+    REQUIRE(snap.average_entry_price == 100u);
+    REQUIRE(snap.realized_pnl_ticks == 40);
+    REQUIRE(snap.unrealized_pnl_ticks == 30);
+    REQUIRE(snap.total_pnl_ticks == 70);
+    REQUIRE(snap.peak_pnl_ticks == 70);
+
+    REQUIRE(tracker.on_fill({3u, me::Side::Sell, 90u, 10u}));
+    snap = tracker.mark_to_market(95u);
+    REQUIRE(snap.inventory == -4);
+    REQUIRE(snap.average_entry_price == 90u);
+    REQUIRE(snap.realized_pnl_ticks == -20);
+    REQUIRE(snap.unrealized_pnl_ticks == -20);
+    REQUIRE(snap.total_pnl_ticks == -40);
+    REQUIRE(snap.drawdown_ticks == 110);
+
+    me::strategy::RiskState risk_state = tracker.risk_state(95u);
+    REQUIRE(risk_state.inventory == -4);
+    REQUIRE(risk_state.gross_notional == 2'340u);
+    REQUIRE(risk_state.realized_pnl_ticks == -20);
+    REQUIRE(risk_state.unrealized_pnl_ticks == -20);
+    REQUIRE(risk_state.peak_pnl_ticks == 70);
+
+    REQUIRE(!tracker.on_fill({4u, me::Side::Buy, 0u, 1u}));
+    REQUIRE(!tracker.on_fill({4u, me::Side::Buy, 100u, 0u}));
+    return true;
+}
+
 }  // namespace
 
 int main() {
@@ -289,7 +332,8 @@ int main() {
         test_parser() &&
         test_order_book() &&
         test_alpha_and_strategy() &&
-        test_risk_controller();
+        test_risk_controller() &&
+        test_position_tracker();
 
     if (!ok) {
         return 1;
