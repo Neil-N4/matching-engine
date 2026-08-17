@@ -20,6 +20,7 @@ This runs `matching_engine_tests`, a small assertion-based harness covering:
 - OBI, micro-price, VPIN bucket accounting
 - atomic feature snapshots
 - VPIN-adaptive quote widening
+- long, short, and crossing position/PnL accounting
 - risk-gate quote sizing, inventory limits, toxicity pause, drawdown kill switch, and notional limits
 
 ## GoogleTest

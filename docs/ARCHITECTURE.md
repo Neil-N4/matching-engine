@@ -30,6 +30,8 @@ The alpha thread consumes `MarketEvent` records and computes:
 
 `AvellanedaStoikovMarketMaker` computes reservation price and total spread from inventory, volatility, gamma, kappa, and time remaining. It widens spreads when VPIN exceeds its rolling baseline by positive z-score.
 
+`PositionTracker` consumes strategy fills where `Side::Buy` increases inventory and `Side::Sell` decreases inventory. It maintains signed open cost, average entry price, realized PnL, mark-to-market unrealized PnL, gross notional, peak PnL, and drawdown. It can export a `RiskState` directly, so risk checks operate on current marked PnL instead of stale realized-only accounting.
+
 `RiskController` sits after quote generation. It returns a `RiskDecision` with quote action and bid/ask sizes:
 
 - `QuoteBoth` under normal inventory, notional, PnL, and VPIN conditions.
@@ -37,4 +39,4 @@ The alpha thread consumes `MarketEvent` records and computes:
 - `PullQuotes` for toxic VPIN z-scores, invalid quotes, or gross-notional breaches.
 - `KillSwitch` for manual kill or drawdown-limit breaches.
 
-The controller is scalar and header-only. It does not allocate, throw, or use string state; runtime labels are returned by fixed `const char*` helpers for logs and demo output.
+The position tracker and risk controller are scalar and header-only. They do not allocate, throw, or use string state; runtime labels are returned by fixed `const char*` helpers for logs and demo output.
