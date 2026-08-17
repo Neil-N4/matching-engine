@@ -15,6 +15,7 @@
 #include "engine/order_book.hpp"
 #include "engine/parser.hpp"
 #include "strategy/avellaneda_stoikov.hpp"
+#include "strategy/position.hpp"
 #include "strategy/risk.hpp"
 
 namespace {
@@ -122,6 +123,17 @@ me::MarketEvent decorate_event(const me::MarketEvent& base, const me::TopOfBook&
     return event;
 }
 
+me::Price mark_price_from_frame(const me::alpha::FeatureFrame& frame, const me::Price fallback) noexcept {
+    if (frame.micro_price > 0.0) {
+        return static_cast<me::Price>((frame.micro_price * me::config::kPriceScale) + 0.5);
+    }
+    if (frame.best_bid != 0u && frame.best_ask != 0u) {
+        return static_cast<me::Price>(
+            (static_cast<std::uint64_t>(frame.best_bid) + frame.best_ask) / 2u);
+    }
+    return fallback;
+}
+
 }  // namespace
 
 int main() {
@@ -132,6 +144,7 @@ int main() {
     std::atomic<bool> engine_done{false};
     me::strategy::Quote final_quote{};
     me::strategy::RiskDecision final_risk{};
+    me::strategy::PositionSnapshot final_position{};
 
     std::thread engine_worker([&]() noexcept {
         pin_thread_to_core(1);
@@ -195,18 +208,25 @@ int main() {
         me::alpha::OnlineSignals<> signals;
         const me::strategy::AvellanedaStoikovMarketMaker market_maker{};
         const me::strategy::RiskController risk_controller{};
-        me::strategy::RiskState risk_state{};
-        risk_state.inventory = 25;
+        me::strategy::PositionTracker position_tracker;
         me::MarketEvent event{};
 
         while (!engine_done.load(std::memory_order_acquire) || !engine_to_alpha.empty()) {
             if (engine_to_alpha.read(event)) {
                 if (event.type == me::EventType::Execute) {
-                    risk_state.gross_notional += static_cast<std::uint64_t>(event.price) * event.quantity;
+                    static_cast<void>(position_tracker.on_fill({
+                        event.timestamp,
+                        event.side,
+                        event.price,
+                        event.quantity,
+                    }));
                 }
                 const me::alpha::FeatureFrame frame = signals.on_event(event);
                 latest_features.publish(frame);
-                final_quote = market_maker.quote(frame, 25, 0.20);
+                const me::Price mark_price = mark_price_from_frame(frame, event.price);
+                final_position = position_tracker.mark_to_market(mark_price);
+                const me::strategy::RiskState risk_state = position_tracker.risk_state(mark_price);
+                final_quote = market_maker.quote(frame, risk_state.inventory, 0.20);
                 final_risk = risk_controller.evaluate(final_quote, frame, risk_state);
             } else {
                 std::this_thread::yield();
@@ -229,6 +249,10 @@ int main() {
               << " risk_reason=" << me::strategy::RiskController::to_string(final_risk.reason)
               << " bid_qty=" << final_risk.bid_quantity
               << " ask_qty=" << final_risk.ask_quantity
+              << " inventory=" << final_position.inventory
+              << " realized_pnl_ticks=" << final_position.realized_pnl_ticks
+              << " unrealized_pnl_ticks=" << final_position.unrealized_pnl_ticks
+              << " drawdown_ticks=" << final_position.drawdown_ticks
               << '\n';
 
     return 0;

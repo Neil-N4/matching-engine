@@ -9,6 +9,7 @@
 #include "engine/order_book.hpp"
 #include "engine/parser.hpp"
 #include "strategy/avellaneda_stoikov.hpp"
+#include "strategy/position.hpp"
 #include "strategy/risk.hpp"
 
 namespace {
@@ -124,9 +125,13 @@ void BM_ItchAddDecode(benchmark::State& state) {
 void BM_AlphaSignalQuoteRisk(benchmark::State& state) {
     me::alpha::OnlineSignals<> signals;
     const me::strategy::AvellanedaStoikovMarketMaker maker{};
-    const me::strategy::RiskController risk{};
-    me::strategy::RiskState risk_state{};
-    risk_state.inventory = 25;
+    me::strategy::RiskConfig risk_config{};
+    risk_config.max_abs_inventory = 10'000'000;
+    risk_config.soft_abs_inventory = 9'000'000;
+    risk_config.max_gross_notional = UINT64_MAX;
+    risk_config.max_drawdown_ticks = INT64_MAX / 4;
+    const me::strategy::RiskController risk{risk_config};
+    me::strategy::PositionTracker position_tracker;
     me::MarketEvent event{};
     event.type = me::EventType::Execute;
     event.best_bid = kBidPrice;
@@ -137,9 +142,16 @@ void BM_AlphaSignalQuoteRisk(benchmark::State& state) {
     for (auto _ : state) {
         event.timestamp += 1u;
         event.side = (event.timestamp & 1u) == 0u ? me::Side::Buy : me::Side::Sell;
-        event.quantity = 200u + static_cast<me::Qty>(event.timestamp & 127u);
+        event.quantity = 200u;
         const me::alpha::FeatureFrame frame = signals.on_event(event);
-        const me::strategy::Quote quote = maker.quote(frame, 25, 0.5);
+        static_cast<void>(position_tracker.on_fill({
+            event.timestamp,
+            event.side,
+            event.price == 0u ? kBidPrice : event.price,
+            event.quantity,
+        }));
+        const me::strategy::RiskState risk_state = position_tracker.risk_state(kBidPrice);
+        const me::strategy::Quote quote = maker.quote(frame, risk_state.inventory, 0.5);
         const me::strategy::RiskDecision decision = risk.evaluate(quote, frame, risk_state);
         benchmark::DoNotOptimize(decision);
     }
@@ -259,11 +271,19 @@ bool run_itch_add_decode() {
 bool run_alpha_signal_quote_risk() {
     static me::alpha::OnlineSignals<> signals;
     static me::strategy::AvellanedaStoikovMarketMaker maker;
-    static me::strategy::RiskController risk;
-    me::strategy::RiskState risk_state{};
-    risk_state.inventory = 25;
+    static me::strategy::RiskConfig risk_config = []() noexcept {
+        me::strategy::RiskConfig config{};
+        config.max_abs_inventory = 10'000'000;
+        config.soft_abs_inventory = 9'000'000;
+        config.max_gross_notional = UINT64_MAX;
+        config.max_drawdown_ticks = INT64_MAX / 4;
+        return config;
+    }();
+    static me::strategy::RiskController risk{risk_config};
+    static me::strategy::PositionTracker position_tracker;
     me::MarketEvent event{};
     event.type = me::EventType::Execute;
+    event.price = kBidPrice;
     event.best_bid = kBidPrice;
     event.best_ask = kAskPrice;
     event.best_bid_quantity = 6'000u;
@@ -272,9 +292,16 @@ bool run_alpha_signal_quote_risk() {
     return run_scenario("alpha_signal_quote_risk", kFastOpsPerSample, [&](const std::size_t i) noexcept {
         event.timestamp = static_cast<me::Timestamp>(i + 1u);
         event.side = (i & 1u) == 0u ? me::Side::Sell : me::Side::Buy;
-        event.quantity = 200u + static_cast<me::Qty>(i & 127u);
+        event.quantity = 200u;
         const me::alpha::FeatureFrame frame = signals.on_event(event);
-        const me::strategy::Quote quote = maker.quote(frame, 25, 0.5);
+        static_cast<void>(position_tracker.on_fill({
+            event.timestamp,
+            event.side,
+            event.price,
+            event.quantity,
+        }));
+        const me::strategy::RiskState risk_state = position_tracker.risk_state(kBidPrice);
+        const me::strategy::Quote quote = maker.quote(frame, risk_state.inventory, 0.5);
         const me::strategy::RiskDecision decision = risk.evaluate(quote, frame, risk_state);
         return quote.ask_price > quote.bid_price &&
                decision.action != me::strategy::RiskAction::KillSwitch;
