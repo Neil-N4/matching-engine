@@ -22,6 +22,7 @@ The alpha thread consumes `MarketEvent` records and computes:
 
 - Order book imbalance: `(bid_qty - ask_qty) / (bid_qty + ask_qty)`
 - Micro-price: ask-weighted-by-bid-depth plus bid-weighted-by-ask-depth
+- Order-flow imbalance: queue-pressure contribution from best bid/ask price and quantity changes, plus an EMA smoother
 - VPIN: rolling normalized absolute buy/sell imbalance over fixed volume buckets
 
 `AtomicFeatureFrame` publishes the latest signal frame as atomics, including packed double fields, so downstream strategy code can poll without a mutex.

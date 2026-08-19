@@ -18,6 +18,7 @@ This runs `matching_engine_tests`, a small assertion-based harness covering:
 - L3 add/cancel/execute/match state transitions
 - duplicate order rejection before matching
 - OBI, micro-price, VPIN bucket accounting
+- OFI and OFI-EMA queue-pressure accounting
 - atomic feature snapshots
 - VPIN-adaptive quote widening
 - long, short, and crossing position/PnL accounting
