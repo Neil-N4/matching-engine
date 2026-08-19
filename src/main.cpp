@@ -242,6 +242,8 @@ int main() {
               << " best_ask=" << frame.best_ask
               << " obi=" << frame.obi
               << " micro_price=" << frame.micro_price
+              << " ofi=" << frame.ofi
+              << " ofi_ema=" << frame.ofi_ema
               << " vpin=" << frame.vpin
               << " quote_bid=" << final_quote.bid_price
               << " quote_ask=" << final_quote.ask_price
