@@ -20,6 +20,8 @@ struct alignas(64) FeatureFrame {
     Qty best_ask_quantity{0};
     double obi{0.0};
     double micro_price{0.0};
+    double ofi{0.0};
+    double ofi_ema{0.0};
     double vpin{0.0};
     double vpin_mean{0.0};
     double vpin_sigma{0.0};
@@ -35,6 +37,8 @@ private:
     std::atomic<Qty> best_ask_quantity_{0};
     std::atomic<std::uint64_t> obi_bits_{pack_double(0.0)};
     std::atomic<std::uint64_t> micro_price_bits_{pack_double(0.0)};
+    std::atomic<std::uint64_t> ofi_bits_{pack_double(0.0)};
+    std::atomic<std::uint64_t> ofi_ema_bits_{pack_double(0.0)};
     std::atomic<std::uint64_t> vpin_bits_{pack_double(0.0)};
     std::atomic<std::uint64_t> vpin_mean_bits_{pack_double(0.0)};
     std::atomic<std::uint64_t> vpin_sigma_bits_{pack_double(0.0)};
@@ -55,6 +59,8 @@ public:
         best_ask_quantity_.store(frame.best_ask_quantity, std::memory_order_relaxed);
         obi_bits_.store(pack_double(frame.obi), std::memory_order_relaxed);
         micro_price_bits_.store(pack_double(frame.micro_price), std::memory_order_relaxed);
+        ofi_bits_.store(pack_double(frame.ofi), std::memory_order_relaxed);
+        ofi_ema_bits_.store(pack_double(frame.ofi_ema), std::memory_order_relaxed);
         vpin_bits_.store(pack_double(frame.vpin), std::memory_order_relaxed);
         vpin_mean_bits_.store(pack_double(frame.vpin_mean), std::memory_order_relaxed);
         vpin_sigma_bits_.store(pack_double(frame.vpin_sigma), std::memory_order_relaxed);
@@ -80,6 +86,8 @@ public:
             frame.best_ask_quantity = best_ask_quantity_.load(std::memory_order_relaxed);
             frame.obi = unpack_double(obi_bits_.load(std::memory_order_relaxed));
             frame.micro_price = unpack_double(micro_price_bits_.load(std::memory_order_relaxed));
+            frame.ofi = unpack_double(ofi_bits_.load(std::memory_order_relaxed));
+            frame.ofi_ema = unpack_double(ofi_ema_bits_.load(std::memory_order_relaxed));
             frame.vpin = unpack_double(vpin_bits_.load(std::memory_order_relaxed));
             frame.vpin_mean = unpack_double(vpin_mean_bits_.load(std::memory_order_relaxed));
             frame.vpin_sigma = unpack_double(vpin_sigma_bits_.load(std::memory_order_relaxed));
@@ -115,6 +123,13 @@ private:
     Qty bucket_buy_volume_{0};
     Qty bucket_sell_volume_{0};
     Qty bucket_total_volume_{0};
+    Price prev_best_bid_{0};
+    Price prev_best_ask_{0};
+    Qty prev_best_bid_quantity_{0};
+    Qty prev_best_ask_quantity_{0};
+    double ofi_ema_{0.0};
+    bool has_previous_book_state_{false};
+    bool has_ofi_ema_{false};
     FeatureFrame last_{};
 
 public:
@@ -134,6 +149,11 @@ public:
                                                 event.best_ask,
                                                 event.best_bid_quantity,
                                                 event.best_ask_quantity);
+        frame.ofi = update_ofi(event.best_bid,
+                               event.best_ask,
+                               event.best_bid_quantity,
+                               event.best_ask_quantity);
+        frame.ofi_ema = ofi_ema_;
         frame.vpin = current_vpin();
         frame.vpin_mean = current_mean();
         frame.vpin_sigma = current_sigma();
@@ -215,6 +235,62 @@ private:
         }
     }
 
+    [[nodiscard]] inline double update_ofi(const Price best_bid,
+                                           const Price best_ask,
+                                           const Qty best_bid_quantity,
+                                           const Qty best_ask_quantity) noexcept {
+        if (best_bid == 0u || best_ask == 0u) [[unlikely]] {
+            store_book_state(best_bid, best_ask, best_bid_quantity, best_ask_quantity);
+            return 0.0;
+        }
+
+        if (!has_previous_book_state_) [[unlikely]] {
+            store_book_state(best_bid, best_ask, best_bid_quantity, best_ask_quantity);
+            update_ofi_ema(0.0);
+            return 0.0;
+        }
+
+        double contribution = 0.0;
+
+        if (best_bid >= prev_best_bid_) {
+            contribution += static_cast<double>(best_bid_quantity);
+        }
+        if (best_bid <= prev_best_bid_) {
+            contribution -= static_cast<double>(prev_best_bid_quantity_);
+        }
+        if (best_ask <= prev_best_ask_) {
+            contribution -= static_cast<double>(best_ask_quantity);
+        }
+        if (best_ask >= prev_best_ask_) {
+            contribution += static_cast<double>(prev_best_ask_quantity_);
+        }
+
+        store_book_state(best_bid, best_ask, best_bid_quantity, best_ask_quantity);
+        update_ofi_ema(contribution);
+        return contribution;
+    }
+
+    inline void store_book_state(const Price best_bid,
+                                 const Price best_ask,
+                                 const Qty best_bid_quantity,
+                                 const Qty best_ask_quantity) noexcept {
+        prev_best_bid_ = best_bid;
+        prev_best_ask_ = best_ask;
+        prev_best_bid_quantity_ = best_bid_quantity;
+        prev_best_ask_quantity_ = best_ask_quantity;
+        has_previous_book_state_ = best_bid != 0u && best_ask != 0u;
+    }
+
+    inline void update_ofi_ema(const double contribution) noexcept {
+        if (!has_ofi_ema_) {
+            ofi_ema_ = contribution;
+            has_ofi_ema_ = true;
+            return;
+        }
+        ofi_ema_ = (config::kOfiEmaAlpha * contribution) +
+                   ((1.0 - config::kOfiEmaAlpha) * ofi_ema_);
+    }
+
     inline void close_bucket() noexcept {
         const double imbalance =
             abs_diff(bucket_buy_volume_, bucket_sell_volume_) / static_cast<double>(BucketVolume);
@@ -243,4 +319,3 @@ private:
 };
 
 }  // namespace me::alpha
-

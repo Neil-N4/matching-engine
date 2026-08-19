@@ -198,8 +198,24 @@ bool test_alpha_and_strategy() {
     me::alpha::FeatureFrame frame = signals.on_event(event);
     REQUIRE(near(frame.obi, 1.0 / 3.0));
     REQUIRE(near(frame.micro_price, 101.33333333333333 / me::config::kPriceScale));
+    REQUIRE(near(frame.ofi, 0.0));
+    REQUIRE(near(frame.ofi_ema, 0.0));
     REQUIRE(frame.vpin == 0.0);
 
+    event.type = me::EventType::Add;
+    event.best_bid_quantity = 130u;
+    event.best_ask_quantity = 45u;
+    frame = signals.on_event(event);
+    REQUIRE(near(frame.ofi, 35.0));
+    REQUIRE(near(frame.ofi_ema, 7.0));
+
+    event.best_bid = 101u;
+    event.best_bid_quantity = 80u;
+    frame = signals.on_event(event);
+    REQUIRE(near(frame.ofi, 80.0));
+    REQUIRE(near(frame.ofi_ema, 21.6));
+
+    event.type = me::EventType::Execute;
     event.timestamp = 2u;
     event.quantity = 60u;
     frame = signals.on_event(event);
@@ -211,6 +227,8 @@ bool test_alpha_and_strategy() {
     const me::alpha::FeatureFrame loaded = atomic_frame.read();
     REQUIRE(loaded.timestamp == frame.timestamp);
     REQUIRE(near(loaded.micro_price, frame.micro_price));
+    REQUIRE(near(loaded.ofi, frame.ofi));
+    REQUIRE(near(loaded.ofi_ema, frame.ofi_ema));
 
     frame.vpin = 0.9;
     frame.vpin_mean = 0.4;

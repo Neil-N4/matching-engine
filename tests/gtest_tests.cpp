@@ -138,6 +138,39 @@ TEST(OnlineSignals, ComputesRollingVpinWindow) {
     EXPECT_NEAR(frame.vpin_sigma, 0.0, 1.0e-12);
 }
 
+TEST(OnlineSignals, ComputesOrderFlowImbalanceAndEma) {
+    me::alpha::OnlineSignals<100u, 2u> signals;
+
+    me::MarketEvent event{};
+    event.type = me::EventType::Add;
+    event.best_bid = 100u;
+    event.best_ask = 102u;
+    event.best_bid_quantity = 100u;
+    event.best_ask_quantity = 50u;
+
+    me::alpha::FeatureFrame frame = signals.on_event(event);
+    EXPECT_DOUBLE_EQ(frame.ofi, 0.0);
+    EXPECT_DOUBLE_EQ(frame.ofi_ema, 0.0);
+
+    event.best_bid_quantity = 130u;
+    event.best_ask_quantity = 45u;
+    frame = signals.on_event(event);
+    EXPECT_DOUBLE_EQ(frame.ofi, 35.0);
+    EXPECT_DOUBLE_EQ(frame.ofi_ema, 7.0);
+
+    event.best_bid = 101u;
+    event.best_bid_quantity = 80u;
+    frame = signals.on_event(event);
+    EXPECT_DOUBLE_EQ(frame.ofi, 80.0);
+    EXPECT_DOUBLE_EQ(frame.ofi_ema, 21.6);
+
+    me::alpha::AtomicFeatureFrame atomic_frame;
+    atomic_frame.publish(frame);
+    const me::alpha::FeatureFrame loaded = atomic_frame.read();
+    EXPECT_DOUBLE_EQ(loaded.ofi, frame.ofi);
+    EXPECT_DOUBLE_EQ(loaded.ofi_ema, frame.ofi_ema);
+}
+
 TEST(Strategy, WidensQuoteWhenVpinZScoreIsPositive) {
     me::alpha::FeatureFrame quiet{};
     quiet.best_bid = 1'000'000u;
