@@ -241,6 +241,32 @@ TEST(Strategy, WidensQuoteWhenVpinZScoreIsPositive) {
     EXPECT_GT(toxic_quote.toxicity_multiplier, 1.0);
 }
 
+TEST(Strategy, UsesSignalVolatilityWhenItExceedsBaseline) {
+    me::alpha::FeatureFrame frame{};
+    frame.best_bid = 1'000'000u;
+    frame.best_ask = 1'000'200u;
+    frame.best_bid_quantity = 100u;
+    frame.best_ask_quantity = 100u;
+    frame.micro_price = 100.01;
+
+    me::strategy::AvellanedaStoikovConfig config{};
+    config.volatility = 0.001;
+    config.max_signal_volatility = 0.050;
+    const me::strategy::AvellanedaStoikovMarketMaker maker(config);
+
+    const me::strategy::Quote quiet = maker.quote(frame, 0, 0.5);
+    EXPECT_DOUBLE_EQ(quiet.effective_volatility, 0.001);
+
+    frame.ewma_volatility = 0.020;
+    const me::strategy::Quote active = maker.quote(frame, 0, 0.5);
+    EXPECT_DOUBLE_EQ(active.effective_volatility, 0.020);
+    EXPECT_GT(active.total_spread, quiet.total_spread);
+
+    frame.ewma_volatility = 0.500;
+    const me::strategy::Quote capped = maker.quote(frame, 0, 0.5);
+    EXPECT_DOUBLE_EQ(capped.effective_volatility, 0.050);
+}
+
 TEST(RiskController, ScalesAndRestrictsQuotesByInventory) {
     me::strategy::RiskConfig config{};
     config.max_abs_inventory = 100;

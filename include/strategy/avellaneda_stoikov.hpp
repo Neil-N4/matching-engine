@@ -12,9 +12,11 @@ struct AvellanedaStoikovConfig {
     double gamma{config::kDefaultGamma};
     double kappa{config::kDefaultKappa};
     double volatility{config::kDefaultVolatility};
+    double max_signal_volatility{1.0};
     double horizon{config::kDefaultHorizon};
     double toxicity_scale{config::kDefaultToxicityScale};
     double min_spread{1.0 / config::kPriceScale};
+    bool use_signal_volatility{true};
 };
 
 struct Quote {
@@ -23,6 +25,7 @@ struct Quote {
     double ask_price{0.0};
     double total_spread{0.0};
     double toxicity_multiplier{1.0};
+    double effective_volatility{0.0};
 };
 
 class AvellanedaStoikovMarketMaker {
@@ -38,7 +41,8 @@ public:
                                      const double elapsed_fraction) const noexcept {
         const double s = reference_price(frame);
         const double time_remaining = remaining_time(elapsed_fraction);
-        const double variance = config_.volatility * config_.volatility;
+        const double volatility = effective_volatility(frame);
+        const double variance = volatility * volatility;
         const double gamma = config_.gamma <= 0.0 ? 1.0e-9 : config_.gamma;
         const double kappa = config_.kappa <= 0.0 ? 1.0e-9 : config_.kappa;
 
@@ -62,6 +66,7 @@ public:
             reservation + half_spread,
             total_spread,
             toxicity,
+            volatility,
         };
     }
 
@@ -102,7 +107,17 @@ private:
         }
         return 1.0 + config_.toxicity_scale * z;
     }
+
+    [[nodiscard]] inline double effective_volatility(const alpha::FeatureFrame& frame) const noexcept {
+        double volatility = config_.volatility > 0.0 ? config_.volatility : 1.0e-9;
+        if (config_.use_signal_volatility && frame.ewma_volatility > volatility) {
+            volatility = frame.ewma_volatility;
+        }
+        if (config_.max_signal_volatility > 0.0 && volatility > config_.max_signal_volatility) {
+            return config_.max_signal_volatility;
+        }
+        return volatility;
+    }
 };
 
 }  // namespace me::strategy
-

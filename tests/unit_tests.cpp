@@ -313,6 +313,33 @@ bool test_risk_controller() {
     return true;
 }
 
+bool test_strategy_uses_signal_volatility() {
+    me::alpha::FeatureFrame frame{};
+    frame.best_bid = 1'000'000u;
+    frame.best_ask = 1'000'200u;
+    frame.best_bid_quantity = 100u;
+    frame.best_ask_quantity = 100u;
+    frame.micro_price = 100.01;
+
+    me::strategy::AvellanedaStoikovConfig config{};
+    config.volatility = 0.001;
+    config.max_signal_volatility = 0.050;
+    const me::strategy::AvellanedaStoikovMarketMaker market_maker(config);
+
+    const me::strategy::Quote quiet = market_maker.quote(frame, 0, 0.5);
+    REQUIRE(near(quiet.effective_volatility, 0.001));
+
+    frame.ewma_volatility = 0.020;
+    const me::strategy::Quote volatile_quote = market_maker.quote(frame, 0, 0.5);
+    REQUIRE(near(volatile_quote.effective_volatility, 0.020));
+    REQUIRE(volatile_quote.total_spread > quiet.total_spread);
+
+    frame.ewma_volatility = 0.500;
+    const me::strategy::Quote capped = market_maker.quote(frame, 0, 0.5);
+    REQUIRE(near(capped.effective_volatility, 0.050));
+    return true;
+}
+
 bool test_position_tracker() {
     me::strategy::PositionTracker tracker;
 
@@ -365,6 +392,7 @@ int main() {
         test_order_book() &&
         test_alpha_and_strategy() &&
         test_risk_controller() &&
+        test_strategy_uses_signal_volatility() &&
         test_position_tracker();
 
     if (!ok) {
