@@ -13,6 +13,8 @@ inline constexpr std::size_t kTelemetryQueueCapacity = 1u << 16u;
 inline constexpr std::uint32_t kVpinBucketVolume = 10'000u;
 inline constexpr std::size_t kVpinWindowBuckets = 64u;
 inline constexpr double kOfiEmaAlpha = 0.20;
+inline constexpr std::size_t kVolatilityWindowSamples = 128u;
+inline constexpr double kVolatilityEmaAlpha = 0.10;
 
 inline constexpr double kDefaultGamma = 0.10;
 inline constexpr double kDefaultKappa = 1.50;

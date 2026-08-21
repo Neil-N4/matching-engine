@@ -1,4 +1,5 @@
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 
@@ -169,6 +170,53 @@ TEST(OnlineSignals, ComputesOrderFlowImbalanceAndEma) {
     const me::alpha::FeatureFrame loaded = atomic_frame.read();
     EXPECT_DOUBLE_EQ(loaded.ofi, frame.ofi);
     EXPECT_DOUBLE_EQ(loaded.ofi_ema, frame.ofi_ema);
+}
+
+TEST(OnlineSignals, ComputesMicroPriceVolatility) {
+    me::alpha::OnlineSignals<100u, 2u> signals;
+
+    me::MarketEvent event{};
+    event.type = me::EventType::Add;
+    event.best_bid = 100u;
+    event.best_ask = 102u;
+    event.best_bid_quantity = 100u;
+    event.best_ask_quantity = 50u;
+
+    me::alpha::FeatureFrame frame = signals.on_event(event);
+    EXPECT_DOUBLE_EQ(frame.micro_return, 0.0);
+    EXPECT_DOUBLE_EQ(frame.realized_volatility, 0.0);
+    EXPECT_DOUBLE_EQ(frame.ewma_volatility, 0.0);
+
+    const double first_micro = frame.micro_price;
+    event.best_bid_quantity = 130u;
+    event.best_ask_quantity = 45u;
+    frame = signals.on_event(event);
+    const double expected_return = std::log(frame.micro_price / first_micro);
+    EXPECT_NEAR(frame.micro_return, expected_return, 1.0e-15);
+    EXPECT_NEAR(frame.realized_volatility, std::fabs(expected_return), 1.0e-15);
+    EXPECT_NEAR(frame.ewma_volatility, std::fabs(expected_return), 1.0e-15);
+
+    const double previous_micro = frame.micro_price;
+    event.best_bid = 101u;
+    event.best_bid_quantity = 80u;
+    frame = signals.on_event(event);
+    const double second_return = std::log(frame.micro_price / previous_micro);
+    const double expected_realized =
+        std::sqrt(((expected_return * expected_return) + (second_return * second_return)) / 2.0);
+    const double expected_ewma = std::sqrt(
+        (me::config::kVolatilityEmaAlpha * second_return * second_return) +
+        ((1.0 - me::config::kVolatilityEmaAlpha) * expected_return * expected_return));
+
+    EXPECT_NEAR(frame.micro_return, second_return, 1.0e-15);
+    EXPECT_NEAR(frame.realized_volatility, expected_realized, 1.0e-15);
+    EXPECT_NEAR(frame.ewma_volatility, expected_ewma, 1.0e-15);
+
+    me::alpha::AtomicFeatureFrame atomic_frame;
+    atomic_frame.publish(frame);
+    const me::alpha::FeatureFrame loaded = atomic_frame.read();
+    EXPECT_DOUBLE_EQ(loaded.micro_return, frame.micro_return);
+    EXPECT_DOUBLE_EQ(loaded.realized_volatility, frame.realized_volatility);
+    EXPECT_DOUBLE_EQ(loaded.ewma_volatility, frame.ewma_volatility);
 }
 
 TEST(Strategy, WidensQuoteWhenVpinZScoreIsPositive) {

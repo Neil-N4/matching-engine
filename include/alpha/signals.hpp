@@ -22,6 +22,9 @@ struct alignas(64) FeatureFrame {
     double micro_price{0.0};
     double ofi{0.0};
     double ofi_ema{0.0};
+    double micro_return{0.0};
+    double realized_volatility{0.0};
+    double ewma_volatility{0.0};
     double vpin{0.0};
     double vpin_mean{0.0};
     double vpin_sigma{0.0};
@@ -39,6 +42,9 @@ private:
     std::atomic<std::uint64_t> micro_price_bits_{pack_double(0.0)};
     std::atomic<std::uint64_t> ofi_bits_{pack_double(0.0)};
     std::atomic<std::uint64_t> ofi_ema_bits_{pack_double(0.0)};
+    std::atomic<std::uint64_t> micro_return_bits_{pack_double(0.0)};
+    std::atomic<std::uint64_t> realized_volatility_bits_{pack_double(0.0)};
+    std::atomic<std::uint64_t> ewma_volatility_bits_{pack_double(0.0)};
     std::atomic<std::uint64_t> vpin_bits_{pack_double(0.0)};
     std::atomic<std::uint64_t> vpin_mean_bits_{pack_double(0.0)};
     std::atomic<std::uint64_t> vpin_sigma_bits_{pack_double(0.0)};
@@ -61,6 +67,9 @@ public:
         micro_price_bits_.store(pack_double(frame.micro_price), std::memory_order_relaxed);
         ofi_bits_.store(pack_double(frame.ofi), std::memory_order_relaxed);
         ofi_ema_bits_.store(pack_double(frame.ofi_ema), std::memory_order_relaxed);
+        micro_return_bits_.store(pack_double(frame.micro_return), std::memory_order_relaxed);
+        realized_volatility_bits_.store(pack_double(frame.realized_volatility), std::memory_order_relaxed);
+        ewma_volatility_bits_.store(pack_double(frame.ewma_volatility), std::memory_order_relaxed);
         vpin_bits_.store(pack_double(frame.vpin), std::memory_order_relaxed);
         vpin_mean_bits_.store(pack_double(frame.vpin_mean), std::memory_order_relaxed);
         vpin_sigma_bits_.store(pack_double(frame.vpin_sigma), std::memory_order_relaxed);
@@ -88,6 +97,10 @@ public:
             frame.micro_price = unpack_double(micro_price_bits_.load(std::memory_order_relaxed));
             frame.ofi = unpack_double(ofi_bits_.load(std::memory_order_relaxed));
             frame.ofi_ema = unpack_double(ofi_ema_bits_.load(std::memory_order_relaxed));
+            frame.micro_return = unpack_double(micro_return_bits_.load(std::memory_order_relaxed));
+            frame.realized_volatility =
+                unpack_double(realized_volatility_bits_.load(std::memory_order_relaxed));
+            frame.ewma_volatility = unpack_double(ewma_volatility_bits_.load(std::memory_order_relaxed));
             frame.vpin = unpack_double(vpin_bits_.load(std::memory_order_relaxed));
             frame.vpin_mean = unpack_double(vpin_mean_bits_.load(std::memory_order_relaxed));
             frame.vpin_sigma = unpack_double(vpin_sigma_bits_.load(std::memory_order_relaxed));
@@ -130,6 +143,14 @@ private:
     double ofi_ema_{0.0};
     bool has_previous_book_state_{false};
     bool has_ofi_ema_{false};
+    std::array<double, config::kVolatilityWindowSamples> return_sq_window_{};
+    std::size_t next_return_sq_{0};
+    std::size_t filled_return_sq_{0};
+    double rolling_return_sq_sum_{0.0};
+    double prev_micro_price_{0.0};
+    double ewma_variance_{0.0};
+    bool has_previous_micro_price_{false};
+    bool has_ewma_variance_{false};
     FeatureFrame last_{};
 
 public:
@@ -154,6 +175,9 @@ public:
                                event.best_bid_quantity,
                                event.best_ask_quantity);
         frame.ofi_ema = ofi_ema_;
+        frame.micro_return = update_volatility(frame.micro_price);
+        frame.realized_volatility = current_realized_volatility();
+        frame.ewma_volatility = current_ewma_volatility();
         frame.vpin = current_vpin();
         frame.vpin_mean = current_mean();
         frame.vpin_sigma = current_sigma();
@@ -289,6 +313,61 @@ private:
         }
         ofi_ema_ = (config::kOfiEmaAlpha * contribution) +
                    ((1.0 - config::kOfiEmaAlpha) * ofi_ema_);
+    }
+
+    [[nodiscard]] inline double update_volatility(const double micro_price) noexcept {
+        if (micro_price <= 0.0) [[unlikely]] {
+            return 0.0;
+        }
+
+        double micro_return = 0.0;
+        if (has_previous_micro_price_ && prev_micro_price_ > 0.0) {
+            micro_return = std::log(micro_price / prev_micro_price_);
+            const double return_sq = micro_return * micro_return;
+            push_return_sq(return_sq);
+            update_ewma_variance(return_sq);
+        }
+
+        prev_micro_price_ = micro_price;
+        has_previous_micro_price_ = true;
+        return micro_return;
+    }
+
+    inline void push_return_sq(const double return_sq) noexcept {
+        if (filled_return_sq_ == config::kVolatilityWindowSamples) {
+            rolling_return_sq_sum_ -= return_sq_window_[next_return_sq_];
+        } else {
+            ++filled_return_sq_;
+        }
+
+        return_sq_window_[next_return_sq_] = return_sq;
+        rolling_return_sq_sum_ += return_sq;
+        next_return_sq_ = (next_return_sq_ + 1u) % config::kVolatilityWindowSamples;
+    }
+
+    inline void update_ewma_variance(const double return_sq) noexcept {
+        if (!has_ewma_variance_) {
+            ewma_variance_ = return_sq;
+            has_ewma_variance_ = true;
+            return;
+        }
+
+        ewma_variance_ = (config::kVolatilityEmaAlpha * return_sq) +
+                         ((1.0 - config::kVolatilityEmaAlpha) * ewma_variance_);
+    }
+
+    [[nodiscard]] inline double current_realized_volatility() const noexcept {
+        if (filled_return_sq_ == 0u) {
+            return 0.0;
+        }
+        return std::sqrt(rolling_return_sq_sum_ / static_cast<double>(filled_return_sq_));
+    }
+
+    [[nodiscard]] inline double current_ewma_volatility() const noexcept {
+        if (!has_ewma_variance_ || ewma_variance_ <= 0.0) {
+            return 0.0;
+        }
+        return std::sqrt(ewma_variance_);
     }
 
     inline void close_bucket() noexcept {

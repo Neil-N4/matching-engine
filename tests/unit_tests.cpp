@@ -200,6 +200,9 @@ bool test_alpha_and_strategy() {
     REQUIRE(near(frame.micro_price, 101.33333333333333 / me::config::kPriceScale));
     REQUIRE(near(frame.ofi, 0.0));
     REQUIRE(near(frame.ofi_ema, 0.0));
+    REQUIRE(near(frame.micro_return, 0.0));
+    REQUIRE(near(frame.realized_volatility, 0.0));
+    REQUIRE(near(frame.ewma_volatility, 0.0));
     REQUIRE(frame.vpin == 0.0);
 
     event.type = me::EventType::Add;
@@ -208,12 +211,20 @@ bool test_alpha_and_strategy() {
     frame = signals.on_event(event);
     REQUIRE(near(frame.ofi, 35.0));
     REQUIRE(near(frame.ofi_ema, 7.0));
+    REQUIRE(frame.micro_return > 0.0);
+    REQUIRE(frame.realized_volatility > 0.0);
+    REQUIRE(frame.ewma_volatility > 0.0);
+    const double first_vol = frame.ewma_volatility;
 
     event.best_bid = 101u;
     event.best_bid_quantity = 80u;
     frame = signals.on_event(event);
     REQUIRE(near(frame.ofi, 80.0));
     REQUIRE(near(frame.ofi_ema, 21.6));
+    REQUIRE(frame.micro_return > 0.0);
+    REQUIRE(frame.realized_volatility > 0.0);
+    REQUIRE(frame.ewma_volatility > 0.0);
+    REQUIRE(!near(frame.ewma_volatility, first_vol, 1.0e-12));
 
     event.type = me::EventType::Execute;
     event.timestamp = 2u;
@@ -229,6 +240,9 @@ bool test_alpha_and_strategy() {
     REQUIRE(near(loaded.micro_price, frame.micro_price));
     REQUIRE(near(loaded.ofi, frame.ofi));
     REQUIRE(near(loaded.ofi_ema, frame.ofi_ema));
+    REQUIRE(near(loaded.micro_return, frame.micro_return));
+    REQUIRE(near(loaded.realized_volatility, frame.realized_volatility));
+    REQUIRE(near(loaded.ewma_volatility, frame.ewma_volatility));
 
     frame.vpin = 0.9;
     frame.vpin_mean = 0.4;
