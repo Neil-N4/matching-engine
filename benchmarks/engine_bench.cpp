@@ -122,7 +122,7 @@ void BM_ItchAddDecode(benchmark::State& state) {
     }
 }
 
-void BM_AlphaSignalOfiQuoteRisk(benchmark::State& state) {
+void BM_AlphaSignalOfiVolQuoteRisk(benchmark::State& state) {
     me::alpha::OnlineSignals<> signals;
     const me::strategy::AvellanedaStoikovMarketMaker maker{};
     me::strategy::RiskConfig risk_config{};
@@ -162,7 +162,7 @@ void BM_AlphaSignalOfiQuoteRisk(benchmark::State& state) {
 BENCHMARK(BM_HotFifoFill);
 BENCHMARK(BM_AddCancelChurn);
 BENCHMARK(BM_ItchAddDecode);
-BENCHMARK(BM_AlphaSignalOfiQuoteRisk);
+BENCHMARK(BM_AlphaSignalOfiVolQuoteRisk);
 BENCHMARK_MAIN();
 
 #else
@@ -268,7 +268,7 @@ bool run_itch_add_decode() {
     });
 }
 
-bool run_alpha_signal_ofi_quote_risk() {
+bool run_alpha_signal_ofi_vol_quote_risk() {
     static me::alpha::OnlineSignals<> signals;
     static me::strategy::AvellanedaStoikovMarketMaker maker;
     static me::strategy::RiskConfig risk_config = []() noexcept {
@@ -289,7 +289,7 @@ bool run_alpha_signal_ofi_quote_risk() {
     event.best_bid_quantity = 6'000u;
     event.best_ask_quantity = 5'000u;
 
-    return run_scenario("alpha_signal_ofi_quote_risk", kFastOpsPerSample, [&](const std::size_t i) noexcept {
+    return run_scenario("alpha_signal_ofi_vol_quote_risk", kFastOpsPerSample, [&](const std::size_t i) noexcept {
         event.timestamp = static_cast<me::Timestamp>(i + 1u);
         event.side = (i & 1u) == 0u ? me::Side::Sell : me::Side::Buy;
         event.quantity = 200u;
@@ -315,7 +315,7 @@ int main() {
         run_hot_fifo_fill() &&
         run_add_cancel_churn() &&
         run_itch_add_decode() &&
-        run_alpha_signal_ofi_quote_risk();
+        run_alpha_signal_ofi_vol_quote_risk();
     return ok ? 0 : 1;
 }
 

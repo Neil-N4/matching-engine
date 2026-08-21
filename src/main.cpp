@@ -244,9 +244,13 @@ int main() {
               << " micro_price=" << frame.micro_price
               << " ofi=" << frame.ofi
               << " ofi_ema=" << frame.ofi_ema
+              << " micro_return=" << frame.micro_return
+              << " realized_vol=" << frame.realized_volatility
+              << " ewma_vol=" << frame.ewma_volatility
               << " vpin=" << frame.vpin
               << " quote_bid=" << final_quote.bid_price
               << " quote_ask=" << final_quote.ask_price
+              << " quote_vol=" << final_quote.effective_volatility
               << " risk_action=" << me::strategy::RiskController::to_string(final_risk.action)
               << " risk_reason=" << me::strategy::RiskController::to_string(final_risk.reason)
               << " bid_qty=" << final_risk.bid_quantity
