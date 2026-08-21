@@ -19,6 +19,7 @@ This runs `matching_engine_tests`, a small assertion-based harness covering:
 - duplicate order rejection before matching
 - OBI, micro-price, VPIN bucket accounting
 - OFI and OFI-EMA queue-pressure accounting
+- micro-price log-return, realized volatility, EWMA volatility, and quote spread widening from signal volatility
 - atomic feature snapshots
 - VPIN-adaptive quote widening
 - long, short, and crossing position/PnL accounting

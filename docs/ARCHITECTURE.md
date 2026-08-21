@@ -23,13 +23,14 @@ The alpha thread consumes `MarketEvent` records and computes:
 - Order book imbalance: `(bid_qty - ask_qty) / (bid_qty + ask_qty)`
 - Micro-price: ask-weighted-by-bid-depth plus bid-weighted-by-ask-depth
 - Order-flow imbalance: queue-pressure contribution from best bid/ask price and quantity changes, plus an EMA smoother
+- Micro-price volatility: log-return, rolling realized volatility, and EWMA volatility from the online micro-price stream
 - VPIN: rolling normalized absolute buy/sell imbalance over fixed volume buckets
 
 `AtomicFeatureFrame` publishes the latest signal frame as atomics, including packed double fields, so downstream strategy code can poll without a mutex.
 
 ## Strategy
 
-`AvellanedaStoikovMarketMaker` computes reservation price and total spread from inventory, volatility, gamma, kappa, and time remaining. It widens spreads when VPIN exceeds its rolling baseline by positive z-score.
+`AvellanedaStoikovMarketMaker` computes reservation price and total spread from inventory, volatility, gamma, kappa, and time remaining. It keeps a configured volatility baseline but can widen quotes when the signal pipeline's EWMA micro-price volatility rises above that baseline. It also widens spreads when VPIN exceeds its rolling baseline by positive z-score.
 
 `PositionTracker` consumes strategy fills where `Side::Buy` increases inventory and `Side::Sell` decreases inventory. It maintains signed open cost, average entry price, realized PnL, mark-to-market unrealized PnL, gross notional, peak PnL, and drawdown. It can export a `RiskState` directly, so risk checks operate on current marked PnL instead of stale realized-only accounting.
 
