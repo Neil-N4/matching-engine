@@ -17,6 +17,7 @@ This runs `matching_engine_tests`, a small assertion-based harness covering:
 - ITCH add/execute parser offsets
 - L3 add/cancel/execute/match state transitions
 - duplicate order rejection before matching
+- GTC default, IOC residual expiry, and FOK all-or-none mutation behavior
 - OBI, micro-price, VPIN bucket accounting
 - OFI and OFI-EMA queue-pressure accounting
 - micro-price log-return, realized volatility, EWMA volatility, and quote spread widening from signal volatility

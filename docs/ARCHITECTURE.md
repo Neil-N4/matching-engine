@@ -12,6 +12,8 @@ Order nodes come from `FixedSlabPool<Order, N>`. Order lookup and price-level lo
 
 The order-ID table uses backward-shift deletion, so long add/cancel sessions with unique order IDs do not accumulate tombstones and degrade future lookup probes. The price-level table keeps level object addresses stable because live `Order` nodes hold direct `PriceLevel*` links.
 
+Limit orders default to `TimeInForce::Gtc`. `TimeInForce::Ioc` executes immediately against crossing levels and expires any residual quantity without resting it. `TimeInForce::Fok` first checks fixed-table crossing liquidity and expires without mutation unless the full requested quantity is available.
+
 ## Price Levels
 
 Each side owns a fixed price-level directory. A price level stores FIFO `head` and `tail` pointers into intrusive `Order` nodes, plus aggregate volume and order count. Best bid/ask are maintained eagerly on add and recomputed only when the current best level is removed.
