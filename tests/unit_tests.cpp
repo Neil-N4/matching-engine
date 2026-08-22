@@ -183,6 +183,60 @@ bool test_order_book() {
     return true;
 }
 
+bool test_time_in_force() {
+    {
+        me::OrderBook<32, 64, 16> book;
+        REQUIRE(book.add_order(1u, me::Side::Sell, 101u, 10u) == me::BookStatus::Accepted);
+
+        const me::ExecutionReport ioc =
+            book.submit_limit_order(2u, me::Side::Buy, 101u, 15u, me::TimeInForce::Ioc);
+        REQUIRE(ioc.status == me::BookStatus::Partial);
+        REQUIRE(ioc.filled_quantity == 10u);
+        REQUIRE(book.find_order(2u) == nullptr);
+        REQUIRE(book.live_orders() == 0u);
+    }
+
+    {
+        me::OrderBook<32, 64, 16> book;
+        REQUIRE(book.add_order(1u, me::Side::Sell, 105u, 10u) == me::BookStatus::Accepted);
+
+        const me::ExecutionReport ioc =
+            book.submit_limit_order(2u, me::Side::Buy, 104u, 10u, me::TimeInForce::Ioc);
+        REQUIRE(ioc.status == me::BookStatus::Expired);
+        REQUIRE(ioc.filled_quantity == 0u);
+        REQUIRE(book.find_order(2u) == nullptr);
+        REQUIRE(book.live_orders() == 1u);
+    }
+
+    {
+        me::OrderBook<32, 64, 16> book;
+        REQUIRE(book.add_order(1u, me::Side::Sell, 101u, 10u) == me::BookStatus::Accepted);
+
+        const me::ExecutionReport fok =
+            book.submit_limit_order(2u, me::Side::Buy, 101u, 15u, me::TimeInForce::Fok);
+        REQUIRE(fok.status == me::BookStatus::Expired);
+        REQUIRE(fok.filled_quantity == 0u);
+        REQUIRE(book.executed_quantity() == 0u);
+        const me::Order* ask = book.find_order(1u);
+        REQUIRE(ask != nullptr);
+        REQUIRE(ask->quantity == 10u);
+    }
+
+    {
+        me::OrderBook<32, 64, 16> book;
+        REQUIRE(book.add_order(1u, me::Side::Sell, 101u, 5u) == me::BookStatus::Accepted);
+        REQUIRE(book.add_order(2u, me::Side::Sell, 102u, 7u) == me::BookStatus::Accepted);
+
+        const me::ExecutionReport fok =
+            book.submit_limit_order(3u, me::Side::Buy, 102u, 12u, me::TimeInForce::Fok);
+        REQUIRE(fok.status == me::BookStatus::Filled);
+        REQUIRE(fok.filled_quantity == 12u);
+        REQUIRE(book.live_orders() == 0u);
+    }
+
+    return true;
+}
+
 bool test_alpha_and_strategy() {
     me::alpha::OnlineSignals<100u, 4u> signals;
     me::MarketEvent event{};
@@ -390,6 +444,7 @@ int main() {
         test_ring() &&
         test_parser() &&
         test_order_book() &&
+        test_time_in_force() &&
         test_alpha_and_strategy() &&
         test_risk_controller() &&
         test_strategy_uses_signal_volatility() &&

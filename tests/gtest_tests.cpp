@@ -106,6 +106,61 @@ TEST(OrderBook, RejectsDuplicateMarketableOrderBeforeMutatingBook) {
     EXPECT_EQ(book.executed_quantity(), 0u);
 }
 
+TEST(OrderBook, ImmediateOrCancelDoesNotRestResidualQuantity) {
+    me::OrderBook<32, 64, 16> book;
+    ASSERT_EQ(book.add_order(1u, me::Side::Sell, 101u, 10u), me::BookStatus::Accepted);
+
+    const me::ExecutionReport report =
+        book.submit_limit_order(2u, me::Side::Buy, 101u, 15u, me::TimeInForce::Ioc);
+
+    EXPECT_EQ(report.status, me::BookStatus::Partial);
+    EXPECT_EQ(report.filled_quantity, 10u);
+    EXPECT_EQ(book.find_order(2u), nullptr);
+    EXPECT_EQ(book.live_orders(), 0u);
+}
+
+TEST(OrderBook, ImmediateOrCancelExpiresWhenNothingCrosses) {
+    me::OrderBook<32, 64, 16> book;
+    ASSERT_EQ(book.add_order(1u, me::Side::Sell, 105u, 10u), me::BookStatus::Accepted);
+
+    const me::ExecutionReport report =
+        book.submit_limit_order(2u, me::Side::Buy, 104u, 10u, me::TimeInForce::Ioc);
+
+    EXPECT_EQ(report.status, me::BookStatus::Expired);
+    EXPECT_EQ(report.filled_quantity, 0u);
+    EXPECT_EQ(book.find_order(2u), nullptr);
+    EXPECT_EQ(book.live_orders(), 1u);
+}
+
+TEST(OrderBook, FillOrKillDoesNotMutateBookWhenInsufficientLiquidity) {
+    me::OrderBook<32, 64, 16> book;
+    ASSERT_EQ(book.add_order(1u, me::Side::Sell, 101u, 10u), me::BookStatus::Accepted);
+
+    const me::ExecutionReport report =
+        book.submit_limit_order(2u, me::Side::Buy, 101u, 15u, me::TimeInForce::Fok);
+
+    EXPECT_EQ(report.status, me::BookStatus::Expired);
+    EXPECT_EQ(report.filled_quantity, 0u);
+    EXPECT_EQ(book.executed_quantity(), 0u);
+
+    const me::Order* ask = book.find_order(1u);
+    ASSERT_NE(ask, nullptr);
+    EXPECT_EQ(ask->quantity, 10u);
+}
+
+TEST(OrderBook, FillOrKillCanConsumeMultipleCrossingLevels) {
+    me::OrderBook<32, 64, 16> book;
+    ASSERT_EQ(book.add_order(1u, me::Side::Sell, 101u, 5u), me::BookStatus::Accepted);
+    ASSERT_EQ(book.add_order(2u, me::Side::Sell, 102u, 7u), me::BookStatus::Accepted);
+
+    const me::ExecutionReport report =
+        book.submit_limit_order(3u, me::Side::Buy, 102u, 12u, me::TimeInForce::Fok);
+
+    EXPECT_EQ(report.status, me::BookStatus::Filled);
+    EXPECT_EQ(report.filled_quantity, 12u);
+    EXPECT_EQ(book.live_orders(), 0u);
+}
+
 TEST(OnlineSignals, ComputesRollingVpinWindow) {
     me::alpha::OnlineSignals<100u, 2u> signals;
 

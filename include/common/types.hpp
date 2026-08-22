@@ -22,6 +22,12 @@ enum class EventType : std::uint8_t {
     Quote = 3,
 };
 
+enum class TimeInForce : std::uint8_t {
+    Gtc = 0,
+    Ioc = 1,
+    Fok = 2,
+};
+
 enum class BookStatus : std::uint8_t {
     Accepted = 0,
     Filled = 1,
@@ -32,6 +38,7 @@ enum class BookStatus : std::uint8_t {
     OrderPoolExhausted = 6,
     OrderDirectoryFull = 7,
     PriceLevelFull = 8,
+    Expired = 9,
 };
 
 struct alignas(64) MarketEvent {
@@ -65,4 +72,3 @@ inline constexpr Price invalid_price() noexcept {
 }
 
 }  // namespace me
-

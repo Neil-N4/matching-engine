@@ -454,6 +454,14 @@ public:
                                                             const Side side,
                                                             const Price price,
                                                             Qty quantity) noexcept {
+        return submit_limit_order(id, side, price, quantity, TimeInForce::Gtc);
+    }
+
+    [[nodiscard]] inline ExecutionReport submit_limit_order(const OrderID id,
+                                                            const Side side,
+                                                            const Price price,
+                                                            Qty quantity,
+                                                            const TimeInForce tif) noexcept {
         ExecutionReport report{};
         if (quantity == 0u) [[unlikely]] {
             report.status = BookStatus::InvalidQuantity;
@@ -461,6 +469,10 @@ public:
         }
         if (orders_.find(id) != nullptr) [[unlikely]] {
             report.status = BookStatus::Duplicate;
+            return report;
+        }
+        if (tif == TimeInForce::Fok && !can_fill_limit_order(side, price, quantity)) [[unlikely]] {
+            report.status = BookStatus::Expired;
             return report;
         }
 
@@ -490,6 +502,11 @@ public:
         }
 
         if (quantity > 0u) {
+            if (tif != TimeInForce::Gtc) {
+                report.status = report.filled_quantity == 0u ? BookStatus::Expired : BookStatus::Partial;
+                return report;
+            }
+
             const BookStatus add_status = add_order(id, side, price, quantity);
             if (report.filled_quantity == 0u) {
                 report.status = add_status;
@@ -543,6 +560,27 @@ public:
     }
 
 private:
+    [[nodiscard]] inline bool can_fill_limit_order(const Side side,
+                                                   const Price price,
+                                                   const Qty quantity) const noexcept {
+        Qty available = 0u;
+        const Side resting_side = opposite(side);
+
+        levels(resting_side).for_each([&available, side, price, quantity](const PriceLevel& level) noexcept {
+            if (available >= quantity) {
+                return;
+            }
+
+            const bool crosses_price = side == Side::Buy ? level.price <= price : level.price >= price;
+            if (crosses_price) {
+                const std::uint64_t sum = static_cast<std::uint64_t>(available) + level.total_volume;
+                available = sum >= quantity ? quantity : static_cast<Qty>(sum);
+            }
+        });
+
+        return available >= quantity;
+    }
+
     [[nodiscard]] inline detail::PriceLevelDirectory<PriceLevelCapacity>& levels(const Side side) noexcept {
         return side == Side::Buy ? bid_levels_ : ask_levels_;
     }
