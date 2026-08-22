@@ -108,6 +108,29 @@ void BM_AddCancelChurn(benchmark::State& state) {
     }
 }
 
+void BM_TimeInForceIocFok(benchmark::State& state) {
+    static GoogleBenchBook book;
+    static me::OrderID next_id = 20'000'000u;
+
+    for (auto _ : state) {
+        const me::OrderID resting_id = next_id++;
+        const me::BookStatus add_status = book.add_order(resting_id, me::Side::Sell, kAskPrice, 4u);
+        const me::ExecutionReport fok =
+            book.submit_limit_order(next_id++, me::Side::Buy, kAskPrice, 5u, me::TimeInForce::Fok);
+        const me::ExecutionReport ioc =
+            book.submit_limit_order(next_id++, me::Side::Buy, kAskPrice, 5u, me::TimeInForce::Ioc);
+        benchmark::DoNotOptimize(ioc);
+
+        if (add_status != me::BookStatus::Accepted ||
+            fok.status != me::BookStatus::Expired ||
+            ioc.status != me::BookStatus::Partial ||
+            ioc.filled_quantity != 4u) [[unlikely]] {
+            state.SkipWithError("IOC/FOK benchmark failed");
+            break;
+        }
+    }
+}
+
 void BM_ItchAddDecode(benchmark::State& state) {
     const RawItchMessage raw = make_add(1'000u, 42u, me::Side::Buy, 100u, kBidPrice);
     me::itch::ParsedMessage parsed{};
@@ -161,6 +184,7 @@ void BM_AlphaSignalOfiVolQuoteRisk(benchmark::State& state) {
 
 BENCHMARK(BM_HotFifoFill);
 BENCHMARK(BM_AddCancelChurn);
+BENCHMARK(BM_TimeInForceIocFok);
 BENCHMARK(BM_ItchAddDecode);
 BENCHMARK(BM_AlphaSignalOfiVolQuoteRisk);
 BENCHMARK_MAIN();
@@ -259,6 +283,24 @@ bool run_add_cancel_churn() {
     });
 }
 
+bool run_time_in_force_ioc_fok() {
+    static ChurnBook book;
+    return run_scenario("time_in_force_ioc_fok", 1u, [](const std::size_t i) noexcept {
+        const me::OrderID base_id = static_cast<me::OrderID>(20'000'000u + (i * 3u));
+        const me::BookStatus add_status = book.add_order(base_id, me::Side::Sell, kAskPrice, 4u);
+        const me::ExecutionReport fok =
+            book.submit_limit_order(base_id + 1u, me::Side::Buy, kAskPrice, 5u, me::TimeInForce::Fok);
+        const me::ExecutionReport ioc =
+            book.submit_limit_order(base_id + 2u, me::Side::Buy, kAskPrice, 5u, me::TimeInForce::Ioc);
+
+        return add_status == me::BookStatus::Accepted &&
+               fok.status == me::BookStatus::Expired &&
+               fok.filled_quantity == 0u &&
+               ioc.status == me::BookStatus::Partial &&
+               ioc.filled_quantity == 4u;
+    });
+}
+
 bool run_itch_add_decode() {
     initialize_add_messages();
     return run_scenario("itch_add_decode", kFastOpsPerSample, [](const std::size_t i) noexcept {
@@ -314,6 +356,7 @@ int main() {
     const bool ok =
         run_hot_fifo_fill() &&
         run_add_cancel_churn() &&
+        run_time_in_force_ioc_fok() &&
         run_itch_add_decode() &&
         run_alpha_signal_ofi_vol_quote_risk();
     return ok ? 0 : 1;

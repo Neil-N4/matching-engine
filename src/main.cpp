@@ -134,6 +134,32 @@ me::Price mark_price_from_frame(const me::alpha::FeatureFrame& frame, const me::
     return fallback;
 }
 
+const char* book_status_to_string(const me::BookStatus status) noexcept {
+    switch (status) {
+        case me::BookStatus::Accepted:
+            return "accepted";
+        case me::BookStatus::Filled:
+            return "filled";
+        case me::BookStatus::Partial:
+            return "partial";
+        case me::BookStatus::NotFound:
+            return "not_found";
+        case me::BookStatus::Duplicate:
+            return "duplicate";
+        case me::BookStatus::InvalidQuantity:
+            return "invalid_quantity";
+        case me::BookStatus::OrderPoolExhausted:
+            return "order_pool_exhausted";
+        case me::BookStatus::OrderDirectoryFull:
+            return "order_directory_full";
+        case me::BookStatus::PriceLevelFull:
+            return "price_level_full";
+        case me::BookStatus::Expired:
+            return "expired";
+    }
+    return "unknown";
+}
+
 }  // namespace
 
 int main() {
@@ -237,6 +263,14 @@ int main() {
     engine_worker.join();
     alpha_worker.join();
 
+    me::OrderBook<16u, 32u, 16u> tif_demo;
+    static_cast<void>(tif_demo.add_order(90'001u, me::Side::Sell, 1'002'000u, 10u));
+    const me::ExecutionReport ioc_demo =
+        tif_demo.submit_limit_order(90'002u, me::Side::Buy, 1'002'000u, 12u, me::TimeInForce::Ioc);
+    static_cast<void>(tif_demo.add_order(90'003u, me::Side::Sell, 1'002'500u, 5u));
+    const me::ExecutionReport fok_demo =
+        tif_demo.submit_limit_order(90'004u, me::Side::Buy, 1'002'500u, 6u, me::TimeInForce::Fok);
+
     const me::alpha::FeatureFrame frame = latest_features.read();
     std::cout << "best_bid=" << frame.best_bid
               << " best_ask=" << frame.best_ask
@@ -259,6 +293,10 @@ int main() {
               << " realized_pnl_ticks=" << final_position.realized_pnl_ticks
               << " unrealized_pnl_ticks=" << final_position.unrealized_pnl_ticks
               << " drawdown_ticks=" << final_position.drawdown_ticks
+              << " ioc_status=" << book_status_to_string(ioc_demo.status)
+              << " ioc_fill=" << ioc_demo.filled_quantity
+              << " fok_status=" << book_status_to_string(fok_demo.status)
+              << " fok_fill=" << fok_demo.filled_quantity
               << '\n';
 
     return 0;
