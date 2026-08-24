@@ -20,6 +20,7 @@ enum class EventType : std::uint8_t {
     Cancel = 1,
     Execute = 2,
     Quote = 3,
+    Replace = 4,
 };
 
 enum class TimeInForce : std::uint8_t {
