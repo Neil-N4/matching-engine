@@ -405,6 +405,55 @@ public:
         return BookStatus::Partial;
     }
 
+    [[nodiscard]] inline BookStatus replace_order(const OrderID old_id,
+                                                  const OrderID new_id,
+                                                  const Price new_price,
+                                                  const Qty new_quantity) noexcept {
+        if (new_quantity == 0u) [[unlikely]] {
+            return BookStatus::InvalidQuantity;
+        }
+
+        Order* const order = orders_.find(old_id);
+        if (order == nullptr) [[unlikely]] {
+            return BookStatus::NotFound;
+        }
+        if (old_id != new_id && orders_.find(new_id) != nullptr) [[unlikely]] {
+            return BookStatus::Duplicate;
+        }
+
+        const Side side = order->side;
+        BookStatus level_status = BookStatus::Accepted;
+        PriceLevel* const new_level = levels(side).get_or_create(new_price, level_status);
+        if (new_level == nullptr) [[unlikely]] {
+            return level_status;
+        }
+
+        const Price old_price = order->price;
+        PriceLevel* const old_level = order->level;
+        old_level->total_volume -= order->quantity;
+        subtract_side_volume(side, order->quantity);
+        unlink_order(*order);
+        orders_.erase(old_id);
+
+        if (old_level != new_level && old_level->order_count == 0u) {
+            levels(side).erase_if_empty(old_price);
+            update_best_after_level_removed(side, old_price);
+        }
+
+        *order = Order{new_id, new_price, new_quantity, side, nullptr, nullptr, new_level};
+        const BookStatus directory_status = orders_.insert(new_id, order);
+        if (directory_status != BookStatus::Accepted) [[unlikely]] {
+            order_pool_.deallocate(order);
+            levels(side).erase_if_empty(new_price);
+            return directory_status;
+        }
+
+        append_order(*new_level, *order);
+        add_side_volume(side, new_quantity);
+        update_best_on_add(side, new_price);
+        return BookStatus::Accepted;
+    }
+
     [[nodiscard]] inline ExecutionReport match_market_order(const Side aggressor_side,
                                                             Qty quantity) noexcept {
         ExecutionReport report{};

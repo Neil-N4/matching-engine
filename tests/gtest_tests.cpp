@@ -51,6 +51,32 @@ RawMessage make_add(const me::Timestamp timestamp,
     return message;
 }
 
+RawMessage make_replace(const me::Timestamp timestamp,
+                        const me::OrderID old_id,
+                        const me::OrderID new_id,
+                        const me::Qty quantity,
+                        const me::Price price) noexcept {
+    RawMessage message{};
+    message.length = me::itch::ItchParser::kOrderReplaceMinBytes;
+    message.bytes[0] = static_cast<std::byte>('U');
+    write_be(message.bytes.data() + me::itch::ItchParser::kTimestampOffset,
+             timestamp,
+             me::itch::ItchParser::kTimestampBytes);
+    write_be(message.bytes.data() + me::itch::ItchParser::kOrderIdOffset,
+             old_id,
+             me::itch::ItchParser::kOrderIdBytes);
+    write_be(message.bytes.data() + me::itch::ItchParser::kReplaceNewOrderIdOffset,
+             new_id,
+             me::itch::ItchParser::kOrderIdBytes);
+    write_be(message.bytes.data() + me::itch::ItchParser::kReplaceQtyOffset,
+             quantity,
+             me::itch::ItchParser::kQtyBytes);
+    write_be(message.bytes.data() + me::itch::ItchParser::kReplacePriceOffset,
+             price,
+             me::itch::ItchParser::kPriceBytes);
+    return message;
+}
+
 }  // namespace
 
 TEST(ItchParser, ParsesAddOrderAndRejectsMalformedFrames) {
@@ -70,6 +96,21 @@ TEST(ItchParser, ParsesAddOrderAndRejectsMalformedFrames) {
     RawMessage unknown = raw;
     unknown.bytes[0] = static_cast<std::byte>('Z');
     EXPECT_FALSE(me::itch::ItchParser::parse(unknown.bytes.data(), unknown.length, parsed));
+}
+
+TEST(ItchParser, ParsesOrderReplace) {
+    const RawMessage raw = make_replace(100u, 42u, 43u, 125u, 1'235'000u);
+
+    me::itch::ParsedMessage parsed{};
+    ASSERT_TRUE(me::itch::ItchParser::parse(raw.bytes.data(), raw.length, parsed));
+    EXPECT_EQ(parsed.kind, me::itch::MessageKind::OrderReplace);
+    EXPECT_EQ(parsed.timestamp, 100u);
+    EXPECT_EQ(parsed.order_id, 42u);
+    EXPECT_EQ(parsed.new_order_id, 43u);
+    EXPECT_EQ(parsed.quantity, 125u);
+    EXPECT_EQ(parsed.price, 1'235'000u);
+
+    EXPECT_FALSE(me::itch::ItchParser::parse(raw.bytes.data(), 10u, parsed));
 }
 
 TEST(OrderBook, PreservesFifoPriorityAtPriceLevel) {
@@ -104,6 +145,51 @@ TEST(OrderBook, RejectsDuplicateMarketableOrderBeforeMutatingBook) {
     ASSERT_NE(ask, nullptr);
     EXPECT_EQ(ask->quantity, 10u);
     EXPECT_EQ(book.executed_quantity(), 0u);
+}
+
+TEST(OrderBook, ReplacesOrderIdPriceAndQuantityWithoutAllocatingNewSlot) {
+    me::OrderBook<32, 64, 16> book;
+    ASSERT_EQ(book.add_order(1u, me::Side::Buy, 100u, 10u), me::BookStatus::Accepted);
+
+    EXPECT_EQ(book.replace_order(1u, 11u, 101u, 12u), me::BookStatus::Accepted);
+    EXPECT_EQ(book.find_order(1u), nullptr);
+
+    const me::Order* replaced = book.find_order(11u);
+    ASSERT_NE(replaced, nullptr);
+    EXPECT_EQ(replaced->side, me::Side::Buy);
+    EXPECT_EQ(replaced->price, 101u);
+    EXPECT_EQ(replaced->quantity, 12u);
+
+    const me::TopOfBook top = book.top_of_book();
+    EXPECT_EQ(top.best_bid, 101u);
+    EXPECT_EQ(top.best_bid_quantity, 12u);
+    EXPECT_EQ(book.total_bid_volume(), 12u);
+    EXPECT_EQ(book.free_order_slots(), 31u);
+}
+
+TEST(OrderBook, SamePriceReplaceLosesFifoPriority) {
+    me::OrderBook<32, 64, 16> book;
+    ASSERT_EQ(book.add_order(1u, me::Side::Sell, 101u, 5u), me::BookStatus::Accepted);
+    ASSERT_EQ(book.add_order(2u, me::Side::Sell, 101u, 5u), me::BookStatus::Accepted);
+    ASSERT_EQ(book.replace_order(1u, 3u, 101u, 5u), me::BookStatus::Accepted);
+
+    const me::ExecutionReport report =
+        book.submit_limit_order(10u, me::Side::Buy, 101u, 5u, me::TimeInForce::Ioc);
+
+    EXPECT_EQ(report.status, me::BookStatus::Filled);
+    EXPECT_EQ(report.filled_quantity, 5u);
+    EXPECT_EQ(book.find_order(2u), nullptr);
+    EXPECT_NE(book.find_order(3u), nullptr);
+}
+
+TEST(OrderBook, ReplaceRejectsDuplicateMissingAndInvalidOrders) {
+    me::OrderBook<32, 64, 16> book;
+    ASSERT_EQ(book.add_order(1u, me::Side::Buy, 100u, 10u), me::BookStatus::Accepted);
+    ASSERT_EQ(book.add_order(2u, me::Side::Buy, 99u, 10u), me::BookStatus::Accepted);
+
+    EXPECT_EQ(book.replace_order(1u, 2u, 101u, 10u), me::BookStatus::Duplicate);
+    EXPECT_EQ(book.replace_order(100u, 3u, 101u, 10u), me::BookStatus::NotFound);
+    EXPECT_EQ(book.replace_order(1u, 3u, 101u, 0u), me::BookStatus::InvalidQuantity);
 }
 
 TEST(OrderBook, ImmediateOrCancelDoesNotRestResidualQuantity) {

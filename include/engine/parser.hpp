@@ -12,12 +12,14 @@ enum class MessageKind : std::uint8_t {
     AddOrder = 'A',
     OrderExecuted = 'E',
     OrderCancel = 'X',
+    OrderReplace = 'U',
 };
 
 struct ParsedMessage {
     MessageKind kind{MessageKind::Unknown};
     Timestamp timestamp{0};
     OrderID order_id{0};
+    OrderID new_order_id{0};
     Side side{Side::Buy};
     Qty quantity{0};
     Price price{0};
@@ -48,6 +50,9 @@ public:
     static constexpr std::size_t kAddPriceOffset = 32u;
     static constexpr std::size_t kExecutedQtyOffset = 19u;
     static constexpr std::size_t kCancelQtyOffset = 19u;
+    static constexpr std::size_t kReplaceNewOrderIdOffset = 19u;
+    static constexpr std::size_t kReplaceQtyOffset = 27u;
+    static constexpr std::size_t kReplacePriceOffset = 31u;
 
     static constexpr std::size_t kTimestampBytes = 6u;
     static constexpr std::size_t kOrderIdBytes = 8u;
@@ -57,6 +62,7 @@ public:
     static constexpr std::size_t kAddOrderMinBytes = 36u;
     static constexpr std::size_t kOrderExecutedMinBytes = 31u;
     static constexpr std::size_t kOrderCancelMinBytes = 23u;
+    static constexpr std::size_t kOrderReplaceMinBytes = 35u;
 
     [[nodiscard]] static inline bool parse(const std::byte* data,
                                            const std::size_t length,
@@ -73,6 +79,8 @@ public:
                 return parse_executed(data, length, out);
             case 'X':
                 return parse_cancel(data, length, out);
+            case 'U':
+                return parse_replace(data, length, out);
             default:
                 out = {};
                 return false;
@@ -90,6 +98,7 @@ private:
         out.kind = MessageKind::AddOrder;
         out.timestamp = detail::read_be(data + kTimestampOffset, kTimestampBytes);
         out.order_id = detail::read_be(data + kOrderIdOffset, kOrderIdBytes);
+        out.new_order_id = 0u;
         out.side = detail::parse_side(data[kAddSideOffset]);
         out.quantity = static_cast<Qty>(detail::read_be(data + kAddQtyOffset, kQtyBytes));
         out.price = static_cast<Price>(detail::read_be(data + kAddPriceOffset, kPriceBytes));
@@ -106,6 +115,7 @@ private:
         out.kind = MessageKind::OrderExecuted;
         out.timestamp = detail::read_be(data + kTimestampOffset, kTimestampBytes);
         out.order_id = detail::read_be(data + kOrderIdOffset, kOrderIdBytes);
+        out.new_order_id = 0u;
         out.quantity = static_cast<Qty>(detail::read_be(data + kExecutedQtyOffset, kQtyBytes));
         out.price = 0u;
         return true;
@@ -121,11 +131,27 @@ private:
         out.kind = MessageKind::OrderCancel;
         out.timestamp = detail::read_be(data + kTimestampOffset, kTimestampBytes);
         out.order_id = detail::read_be(data + kOrderIdOffset, kOrderIdBytes);
+        out.new_order_id = 0u;
         out.quantity = static_cast<Qty>(detail::read_be(data + kCancelQtyOffset, kQtyBytes));
         out.price = 0u;
+        return true;
+    }
+
+    [[nodiscard]] static inline bool parse_replace(const std::byte* data,
+                                                   const std::size_t length,
+                                                   ParsedMessage& out) noexcept {
+        if (length < kOrderReplaceMinBytes) [[unlikely]] {
+            return false;
+        }
+
+        out.kind = MessageKind::OrderReplace;
+        out.timestamp = detail::read_be(data + kTimestampOffset, kTimestampBytes);
+        out.order_id = detail::read_be(data + kOrderIdOffset, kOrderIdBytes);
+        out.new_order_id = detail::read_be(data + kReplaceNewOrderIdOffset, kOrderIdBytes);
+        out.quantity = static_cast<Qty>(detail::read_be(data + kReplaceQtyOffset, kQtyBytes));
+        out.price = static_cast<Price>(detail::read_be(data + kReplacePriceOffset, kPriceBytes));
         return true;
     }
 };
 
 }  // namespace me::itch
-

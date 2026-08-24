@@ -81,6 +81,32 @@ RawMessage exec_msg(const me::Timestamp timestamp, const me::OrderID id, const m
     return message;
 }
 
+RawMessage replace_msg(const me::Timestamp timestamp,
+                       const me::OrderID old_id,
+                       const me::OrderID new_id,
+                       const me::Qty quantity,
+                       const me::Price price) noexcept {
+    RawMessage message{};
+    message.length = me::itch::ItchParser::kOrderReplaceMinBytes;
+    message.bytes[0] = static_cast<std::byte>('U');
+    write_be(message.bytes.data() + me::itch::ItchParser::kTimestampOffset,
+             timestamp,
+             me::itch::ItchParser::kTimestampBytes);
+    write_be(message.bytes.data() + me::itch::ItchParser::kOrderIdOffset,
+             old_id,
+             me::itch::ItchParser::kOrderIdBytes);
+    write_be(message.bytes.data() + me::itch::ItchParser::kReplaceNewOrderIdOffset,
+             new_id,
+             me::itch::ItchParser::kOrderIdBytes);
+    write_be(message.bytes.data() + me::itch::ItchParser::kReplaceQtyOffset,
+             quantity,
+             me::itch::ItchParser::kQtyBytes);
+    write_be(message.bytes.data() + me::itch::ItchParser::kReplacePriceOffset,
+             price,
+             me::itch::ItchParser::kPriceBytes);
+    return message;
+}
+
 bool near(const double lhs, const double rhs, const double eps = 1.0e-9) noexcept {
     return std::fabs(lhs - rhs) <= eps;
 }
@@ -141,6 +167,15 @@ bool test_parser() {
     REQUIRE(me::itch::ItchParser::parse(exec.bytes.data(), exec.length, parsed));
     REQUIRE(parsed.kind == me::itch::MessageKind::OrderExecuted);
     REQUIRE(parsed.quantity == 75u);
+
+    const RawMessage replace = replace_msg(100u, 42u, 43u, 125u, 1'235'000u);
+    REQUIRE(me::itch::ItchParser::parse(replace.bytes.data(), replace.length, parsed));
+    REQUIRE(parsed.kind == me::itch::MessageKind::OrderReplace);
+    REQUIRE(parsed.timestamp == 100u);
+    REQUIRE(parsed.order_id == 42u);
+    REQUIRE(parsed.new_order_id == 43u);
+    REQUIRE(parsed.quantity == 125u);
+    REQUIRE(parsed.price == 1'235'000u);
     return true;
 }
 
@@ -180,6 +215,52 @@ bool test_order_book() {
     top = book.top_of_book();
     REQUIRE(top.best_ask == 103u);
     REQUIRE(top.best_ask_quantity == 18u);
+    return true;
+}
+
+bool test_order_replace() {
+    {
+        me::OrderBook<32, 64, 16> book;
+        REQUIRE(book.add_order(1u, me::Side::Buy, 100u, 10u) == me::BookStatus::Accepted);
+        REQUIRE(book.replace_order(1u, 11u, 101u, 12u) == me::BookStatus::Accepted);
+        REQUIRE(book.find_order(1u) == nullptr);
+
+        const me::Order* replaced = book.find_order(11u);
+        REQUIRE(replaced != nullptr);
+        REQUIRE(replaced->side == me::Side::Buy);
+        REQUIRE(replaced->price == 101u);
+        REQUIRE(replaced->quantity == 12u);
+
+        const me::TopOfBook top = book.top_of_book();
+        REQUIRE(top.best_bid == 101u);
+        REQUIRE(top.best_bid_quantity == 12u);
+        REQUIRE(book.total_bid_volume() == 12u);
+        REQUIRE(book.free_order_slots() == 31u);
+    }
+
+    {
+        me::OrderBook<32, 64, 16> book;
+        REQUIRE(book.add_order(1u, me::Side::Sell, 101u, 5u) == me::BookStatus::Accepted);
+        REQUIRE(book.add_order(2u, me::Side::Sell, 101u, 5u) == me::BookStatus::Accepted);
+        REQUIRE(book.replace_order(1u, 3u, 101u, 5u) == me::BookStatus::Accepted);
+
+        const me::ExecutionReport report =
+            book.submit_limit_order(10u, me::Side::Buy, 101u, 5u, me::TimeInForce::Ioc);
+        REQUIRE(report.status == me::BookStatus::Filled);
+        REQUIRE(report.filled_quantity == 5u);
+        REQUIRE(book.find_order(2u) == nullptr);
+        REQUIRE(book.find_order(3u) != nullptr);
+    }
+
+    {
+        me::OrderBook<32, 64, 16> book;
+        REQUIRE(book.add_order(1u, me::Side::Buy, 100u, 10u) == me::BookStatus::Accepted);
+        REQUIRE(book.add_order(2u, me::Side::Buy, 99u, 10u) == me::BookStatus::Accepted);
+        REQUIRE(book.replace_order(1u, 2u, 101u, 10u) == me::BookStatus::Duplicate);
+        REQUIRE(book.replace_order(100u, 3u, 101u, 10u) == me::BookStatus::NotFound);
+        REQUIRE(book.replace_order(1u, 3u, 101u, 0u) == me::BookStatus::InvalidQuantity);
+    }
+
     return true;
 }
 
@@ -444,6 +525,7 @@ int main() {
         test_ring() &&
         test_parser() &&
         test_order_book() &&
+        test_order_replace() &&
         test_time_in_force() &&
         test_alpha_and_strategy() &&
         test_risk_controller() &&
