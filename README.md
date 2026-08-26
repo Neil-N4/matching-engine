@@ -7,7 +7,7 @@ The hot path avoids heap allocation by using fixed-capacity, cache-line-aligned 
 - `FixedSlabPool<T, N>` owns order nodes in pre-linked 64-byte chunks.
 - `LockFreeSPSC<T, N>` moves engine events to the alpha thread using atomic head/tail sequences.
 - The L3 book uses intrusive FIFO queues per price level plus fixed open-addressed tables for order and price lookup.
-- The ITCH path decodes add, execute, cancel, and replace frames; replace reuses the order node while applying cancel-replace FIFO priority.
+- The ITCH path decodes add, execute, cancel, replace, and delete frames; replace reuses the order node while applying cancel-replace FIFO priority.
 - Limit orders support GTC, IOC, and FOK time-in-force policies.
 - `PositionTracker` maintains signed inventory, open cost, realized/unrealized PnL, gross notional, peak PnL, and drawdown.
 - `RiskController` evaluates quote permissions and sizes from inventory, notional, drawdown, and VPIN toxicity state.
@@ -39,7 +39,7 @@ CI installs GTest and configures with `MATCHING_ENGINE_REQUIRE_GTEST=ON`, so the
 ./build/engine_bench
 ```
 
-If Google Benchmark is installed, the benchmark target links against it. Otherwise it builds a standalone latency harness that reports median, p99, and throughput for hot FIFO fills, IOC/FOK handling, add/cancel and replace churn, ITCH add/replace decode, and alpha OFI/volatility/quote/position/risk generation.
+If Google Benchmark is installed, the benchmark target links against it. Otherwise it builds a standalone latency harness that reports median, p99, and throughput for hot FIFO fills, IOC/FOK handling, add/cancel, replace, and delete churn, ITCH add/replace/delete decode, and alpha OFI/volatility/quote/position/risk generation.
 
 More detail:
 

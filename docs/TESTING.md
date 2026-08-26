@@ -14,8 +14,9 @@ This runs `matching_engine_tests`, a small assertion-based harness covering:
 
 - slab-pool exhaustion and reuse
 - SPSC full/empty behavior
-- ITCH add/execute/replace parser offsets
+- ITCH add/execute/replace/delete parser offsets
 - L3 add/cancel/execute/match state transitions
+- full-order delete removal, best-level recomputation, slab-slot reuse, and no execution accounting
 - order replace ID/price/quantity mutation, duplicate/missing rejection, slot reuse, and same-price FIFO priority loss
 - duplicate order rejection before matching
 - GTC default, IOC residual expiry, and FOK all-or-none mutation behavior

@@ -4,8 +4,8 @@
 
 The matching hot path is single-writer and allocation-free after object construction:
 
-1. `ItchParser::parse` decodes raw NASDAQ ITCH 5.0 add, execute, cancel, and replace message bytes with fixed offsets and big-endian scalar reads.
-2. `OrderBook::add_order`, `cancel_order`, `execute_order`, `replace_order`, and `match_market_order` mutate intrusive order queues.
+1. `ItchParser::parse` decodes raw NASDAQ ITCH 5.0 add, execute, cancel, replace, and delete message bytes with fixed offsets and big-endian scalar reads.
+2. `OrderBook::add_order`, `cancel_order`, `delete_order`, `execute_order`, `replace_order`, and `match_market_order` mutate intrusive order queues.
 3. `LockFreeSPSC::write` publishes a `MarketEvent` to the alpha thread through atomic head/tail sequence counters.
 
 Order nodes come from `FixedSlabPool<Order, N>`. Order lookup and price-level lookup use fixed-capacity open-addressed tables. There is no `std::vector`, `std::unordered_map`, `malloc`, or allocator-backed container in the book path.
@@ -15,6 +15,8 @@ The order-ID table uses backward-shift deletion, so long add/cancel sessions wit
 Limit orders default to `TimeInForce::Gtc`. `TimeInForce::Ioc` executes immediately against crossing levels and expires any residual quantity without resting it. `TimeInForce::Fok` first checks fixed-table crossing liquidity and expires without mutation unless the full requested quantity is available.
 
 ITCH `U` order replace is implemented as cancel-replace at book level: the old order ID must exist, the new order ID must not collide, the new size must be non-zero, and the order keeps its original side. The operation reuses the existing slab-allocated `Order` node, rewrites ID/price/quantity, moves it to the tail of the target price level, and updates aggregate side volume and best bid/ask state. Same-price replaces still lose FIFO priority, matching the expected L3 semantics.
+
+ITCH `D` order delete removes the full remaining quantity for a resting order by ID. It updates price-level volume, side aggregate volume, best bid/ask state, and slab availability without touching execution notional or executed quantity counters.
 
 ## Price Levels
 
