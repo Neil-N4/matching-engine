@@ -380,6 +380,18 @@ public:
         return BookStatus::Partial;
     }
 
+    [[nodiscard]] inline BookStatus delete_order(const OrderID id) noexcept {
+        Order* const order = orders_.find(id);
+        if (order == nullptr) [[unlikely]] {
+            return BookStatus::NotFound;
+        }
+
+        order->level->total_volume -= order->quantity;
+        subtract_side_volume(order->side, order->quantity);
+        remove_order(order);
+        return BookStatus::Filled;
+    }
+
     [[nodiscard]] inline BookStatus execute_order(const OrderID id, const Qty quantity) noexcept {
         Order* const order = orders_.find(id);
         if (order == nullptr) [[unlikely]] {

@@ -77,6 +77,19 @@ RawMessage make_replace(const me::Timestamp timestamp,
     return message;
 }
 
+RawMessage make_delete(const me::Timestamp timestamp, const me::OrderID id) noexcept {
+    RawMessage message{};
+    message.length = me::itch::ItchParser::kOrderDeleteMinBytes;
+    message.bytes[0] = static_cast<std::byte>('D');
+    write_be(message.bytes.data() + me::itch::ItchParser::kTimestampOffset,
+             timestamp,
+             me::itch::ItchParser::kTimestampBytes);
+    write_be(message.bytes.data() + me::itch::ItchParser::kOrderIdOffset,
+             id,
+             me::itch::ItchParser::kOrderIdBytes);
+    return message;
+}
+
 }  // namespace
 
 TEST(ItchParser, ParsesAddOrderAndRejectsMalformedFrames) {
@@ -113,6 +126,20 @@ TEST(ItchParser, ParsesOrderReplace) {
     EXPECT_FALSE(me::itch::ItchParser::parse(raw.bytes.data(), 10u, parsed));
 }
 
+TEST(ItchParser, ParsesOrderDelete) {
+    const RawMessage raw = make_delete(98u, 42u);
+
+    me::itch::ParsedMessage parsed{};
+    ASSERT_TRUE(me::itch::ItchParser::parse(raw.bytes.data(), raw.length, parsed));
+    EXPECT_EQ(parsed.kind, me::itch::MessageKind::OrderDelete);
+    EXPECT_EQ(parsed.timestamp, 98u);
+    EXPECT_EQ(parsed.order_id, 42u);
+    EXPECT_EQ(parsed.quantity, 0u);
+    EXPECT_EQ(parsed.price, 0u);
+
+    EXPECT_FALSE(me::itch::ItchParser::parse(raw.bytes.data(), 10u, parsed));
+}
+
 TEST(OrderBook, PreservesFifoPriorityAtPriceLevel) {
     me::OrderBook<16, 32, 16> book;
     ASSERT_EQ(book.add_order(1u, me::Side::Sell, 101u, 5u), me::BookStatus::Accepted);
@@ -145,6 +172,37 @@ TEST(OrderBook, RejectsDuplicateMarketableOrderBeforeMutatingBook) {
     ASSERT_NE(ask, nullptr);
     EXPECT_EQ(ask->quantity, 10u);
     EXPECT_EQ(book.executed_quantity(), 0u);
+}
+
+TEST(OrderBook, DeletesFullOrderAndUpdatesBestLevelsWithoutExecutionAccounting) {
+    me::OrderBook<32, 64, 16> book;
+    ASSERT_EQ(book.add_order(1u, me::Side::Buy, 100u, 10u), me::BookStatus::Accepted);
+    ASSERT_EQ(book.add_order(2u, me::Side::Buy, 101u, 20u), me::BookStatus::Accepted);
+    ASSERT_EQ(book.add_order(3u, me::Side::Sell, 105u, 30u), me::BookStatus::Accepted);
+
+    EXPECT_EQ(book.delete_order(2u), me::BookStatus::Filled);
+    EXPECT_EQ(book.find_order(2u), nullptr);
+    me::TopOfBook top = book.top_of_book();
+    EXPECT_EQ(top.best_bid, 100u);
+    EXPECT_EQ(top.best_bid_quantity, 10u);
+    EXPECT_EQ(top.best_ask, 105u);
+    EXPECT_EQ(book.total_bid_volume(), 10u);
+    EXPECT_EQ(book.live_orders(), 2u);
+    EXPECT_EQ(book.free_order_slots(), 30u);
+    EXPECT_EQ(book.executed_quantity(), 0u);
+    EXPECT_EQ(book.executed_notional(), 0u);
+
+    EXPECT_EQ(book.delete_order(3u), me::BookStatus::Filled);
+    top = book.top_of_book();
+    EXPECT_EQ(top.best_ask, 0u);
+    EXPECT_EQ(top.best_ask_quantity, 0u);
+    EXPECT_EQ(book.total_ask_volume(), 0u);
+
+    EXPECT_EQ(book.delete_order(100u), me::BookStatus::NotFound);
+    EXPECT_EQ(book.add_order(4u, me::Side::Sell, 104u, 15u), me::BookStatus::Accepted);
+    top = book.top_of_book();
+    EXPECT_EQ(top.best_ask, 104u);
+    EXPECT_EQ(top.best_ask_quantity, 15u);
 }
 
 TEST(OrderBook, ReplacesOrderIdPriceAndQuantityWithoutAllocatingNewSlot) {

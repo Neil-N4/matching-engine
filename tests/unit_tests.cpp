@@ -81,6 +81,19 @@ RawMessage exec_msg(const me::Timestamp timestamp, const me::OrderID id, const m
     return message;
 }
 
+RawMessage delete_msg(const me::Timestamp timestamp, const me::OrderID id) noexcept {
+    RawMessage message{};
+    message.length = me::itch::ItchParser::kOrderDeleteMinBytes;
+    message.bytes[0] = static_cast<std::byte>('D');
+    write_be(message.bytes.data() + me::itch::ItchParser::kTimestampOffset,
+             timestamp,
+             me::itch::ItchParser::kTimestampBytes);
+    write_be(message.bytes.data() + me::itch::ItchParser::kOrderIdOffset,
+             id,
+             me::itch::ItchParser::kOrderIdBytes);
+    return message;
+}
+
 RawMessage replace_msg(const me::Timestamp timestamp,
                        const me::OrderID old_id,
                        const me::OrderID new_id,
@@ -168,6 +181,14 @@ bool test_parser() {
     REQUIRE(parsed.kind == me::itch::MessageKind::OrderExecuted);
     REQUIRE(parsed.quantity == 75u);
 
+    const RawMessage deletion = delete_msg(98u, 42u);
+    REQUIRE(me::itch::ItchParser::parse(deletion.bytes.data(), deletion.length, parsed));
+    REQUIRE(parsed.kind == me::itch::MessageKind::OrderDelete);
+    REQUIRE(parsed.timestamp == 98u);
+    REQUIRE(parsed.order_id == 42u);
+    REQUIRE(parsed.quantity == 0u);
+    REQUIRE(parsed.price == 0u);
+
     const RawMessage replace = replace_msg(100u, 42u, 43u, 125u, 1'235'000u);
     REQUIRE(me::itch::ItchParser::parse(replace.bytes.data(), replace.length, parsed));
     REQUIRE(parsed.kind == me::itch::MessageKind::OrderReplace);
@@ -215,6 +236,38 @@ bool test_order_book() {
     top = book.top_of_book();
     REQUIRE(top.best_ask == 103u);
     REQUIRE(top.best_ask_quantity == 18u);
+    return true;
+}
+
+bool test_order_delete() {
+    me::OrderBook<32, 64, 16> book;
+    REQUIRE(book.add_order(1u, me::Side::Buy, 100u, 10u) == me::BookStatus::Accepted);
+    REQUIRE(book.add_order(2u, me::Side::Buy, 101u, 20u) == me::BookStatus::Accepted);
+    REQUIRE(book.add_order(3u, me::Side::Sell, 105u, 30u) == me::BookStatus::Accepted);
+
+    REQUIRE(book.delete_order(2u) == me::BookStatus::Filled);
+    REQUIRE(book.find_order(2u) == nullptr);
+    me::TopOfBook top = book.top_of_book();
+    REQUIRE(top.best_bid == 100u);
+    REQUIRE(top.best_bid_quantity == 10u);
+    REQUIRE(top.best_ask == 105u);
+    REQUIRE(book.total_bid_volume() == 10u);
+    REQUIRE(book.live_orders() == 2u);
+    REQUIRE(book.free_order_slots() == 30u);
+    REQUIRE(book.executed_quantity() == 0u);
+    REQUIRE(book.executed_notional() == 0u);
+
+    REQUIRE(book.delete_order(3u) == me::BookStatus::Filled);
+    top = book.top_of_book();
+    REQUIRE(top.best_ask == 0u);
+    REQUIRE(top.best_ask_quantity == 0u);
+    REQUIRE(book.total_ask_volume() == 0u);
+
+    REQUIRE(book.delete_order(100u) == me::BookStatus::NotFound);
+    REQUIRE(book.add_order(4u, me::Side::Sell, 104u, 15u) == me::BookStatus::Accepted);
+    top = book.top_of_book();
+    REQUIRE(top.best_ask == 104u);
+    REQUIRE(top.best_ask_quantity == 15u);
     return true;
 }
 
@@ -525,6 +578,7 @@ int main() {
         test_ring() &&
         test_parser() &&
         test_order_book() &&
+        test_order_delete() &&
         test_order_replace() &&
         test_time_in_force() &&
         test_alpha_and_strategy() &&

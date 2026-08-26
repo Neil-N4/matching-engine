@@ -13,6 +13,7 @@ enum class MessageKind : std::uint8_t {
     OrderExecuted = 'E',
     OrderCancel = 'X',
     OrderReplace = 'U',
+    OrderDelete = 'D',
 };
 
 struct ParsedMessage {
@@ -63,6 +64,7 @@ public:
     static constexpr std::size_t kOrderExecutedMinBytes = 31u;
     static constexpr std::size_t kOrderCancelMinBytes = 23u;
     static constexpr std::size_t kOrderReplaceMinBytes = 35u;
+    static constexpr std::size_t kOrderDeleteMinBytes = 19u;
 
     [[nodiscard]] static inline bool parse(const std::byte* data,
                                            const std::size_t length,
@@ -81,6 +83,8 @@ public:
                 return parse_cancel(data, length, out);
             case 'U':
                 return parse_replace(data, length, out);
+            case 'D':
+                return parse_delete(data, length, out);
             default:
                 out = {};
                 return false;
@@ -150,6 +154,22 @@ private:
         out.new_order_id = detail::read_be(data + kReplaceNewOrderIdOffset, kOrderIdBytes);
         out.quantity = static_cast<Qty>(detail::read_be(data + kReplaceQtyOffset, kQtyBytes));
         out.price = static_cast<Price>(detail::read_be(data + kReplacePriceOffset, kPriceBytes));
+        return true;
+    }
+
+    [[nodiscard]] static inline bool parse_delete(const std::byte* data,
+                                                  const std::size_t length,
+                                                  ParsedMessage& out) noexcept {
+        if (length < kOrderDeleteMinBytes) [[unlikely]] {
+            return false;
+        }
+
+        out.kind = MessageKind::OrderDelete;
+        out.timestamp = detail::read_be(data + kTimestampOffset, kTimestampBytes);
+        out.order_id = detail::read_be(data + kOrderIdOffset, kOrderIdBytes);
+        out.new_order_id = 0u;
+        out.quantity = 0u;
+        out.price = 0u;
         return true;
     }
 };
