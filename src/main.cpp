@@ -108,6 +108,19 @@ RawItchMessage make_cancel(const me::Timestamp timestamp,
     return message;
 }
 
+RawItchMessage make_delete(const me::Timestamp timestamp, const me::OrderID id) noexcept {
+    RawItchMessage message{};
+    message.length = me::itch::ItchParser::kOrderDeleteMinBytes;
+    message.bytes[0] = static_cast<std::byte>('D');
+    write_be(message.bytes.data() + me::itch::ItchParser::kTimestampOffset,
+             timestamp,
+             me::itch::ItchParser::kTimestampBytes);
+    write_be(message.bytes.data() + me::itch::ItchParser::kOrderIdOffset,
+             id,
+             me::itch::ItchParser::kOrderIdBytes);
+    return message;
+}
+
 RawItchMessage make_replace(const me::Timestamp timestamp,
                             const me::OrderID old_id,
                             const me::OrderID new_id,
@@ -201,13 +214,15 @@ int main() {
     std::thread engine_worker([&]() noexcept {
         pin_thread_to_core(1);
 
-        const std::array<RawItchMessage, 9> feed{
+        const std::array<RawItchMessage, 11> feed{
             make_add(1'000u, 1001u, me::Side::Buy, 4'000u, 1'001'000u),
             make_add(1'100u, 1002u, me::Side::Buy, 6'000u, 1'000'900u),
             make_add(1'200u, 2001u, me::Side::Sell, 5'000u, 1'001'500u),
             make_add(1'300u, 2002u, me::Side::Sell, 5'500u, 1'001'600u),
+            make_add(1'325u, 2005u, me::Side::Sell, 800u, 1'001'800u),
             make_replace(1'350u, 2002u, 2004u, 5'200u, 1'001'450u),
             make_execute(1'400u, 2001u, 5'000u),
+            make_delete(1'450u, 2005u),
             make_execute(1'500u, 1001u, 4'000u),
             make_cancel(1'600u, 1002u, 1'500u),
             make_add(1'700u, 2003u, me::Side::Sell, 7'000u, 1'001'400u),
@@ -244,6 +259,20 @@ int main() {
                 const me::BookStatus status =
                     book.replace_order(parsed.order_id, parsed.new_order_id, parsed.price, parsed.quantity);
                 if (status != me::BookStatus::Accepted) [[unlikely]] {
+                    continue;
+                }
+            } else if (parsed.kind == me::itch::MessageKind::OrderDelete) {
+                const me::Order* const order = book.find_order(parsed.order_id);
+                if (order == nullptr) [[unlikely]] {
+                    continue;
+                }
+
+                base.type = me::EventType::Delete;
+                base.side = order->side;
+                base.price = order->price;
+                base.quantity = order->quantity;
+                const me::BookStatus status = book.delete_order(parsed.order_id);
+                if (status != me::BookStatus::Filled) [[unlikely]] {
                     continue;
                 }
             } else {

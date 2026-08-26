@@ -83,6 +83,19 @@ void write_be(std::byte* out, std::uint64_t value, const std::size_t width) noex
     return message;
 }
 
+[[nodiscard]] RawItchMessage make_delete(const me::Timestamp timestamp, const me::OrderID id) noexcept {
+    RawItchMessage message{};
+    message.length = me::itch::ItchParser::kOrderDeleteMinBytes;
+    message.bytes[0] = static_cast<std::byte>('D');
+    write_be(message.bytes.data() + me::itch::ItchParser::kTimestampOffset,
+             timestamp,
+             me::itch::ItchParser::kTimestampBytes);
+    write_be(message.bytes.data() + me::itch::ItchParser::kOrderIdOffset,
+             id,
+             me::itch::ItchParser::kOrderIdBytes);
+    return message;
+}
+
 [[nodiscard]] std::uint64_t nanos_since(const std::chrono::steady_clock::time_point start,
                                         const std::chrono::steady_clock::time_point end) noexcept {
     return static_cast<std::uint64_t>(
@@ -156,6 +169,23 @@ void BM_ReplaceChurn(benchmark::State& state) {
     }
 }
 
+void BM_DeleteChurn(benchmark::State& state) {
+    static GoogleBenchBook book;
+    static me::OrderID next_id = 40'000'000u;
+
+    for (auto _ : state) {
+        const me::OrderID id = next_id++;
+        const me::Price price = kAskPrice + static_cast<me::Price>(id & 1023u);
+        const me::BookStatus add_status = book.add_order(id, me::Side::Sell, price, 10u);
+        const me::BookStatus delete_status = book.delete_order(id);
+        benchmark::DoNotOptimize(delete_status);
+        if (add_status != me::BookStatus::Accepted || delete_status != me::BookStatus::Filled) [[unlikely]] {
+            state.SkipWithError("delete churn benchmark failed");
+            break;
+        }
+    }
+}
+
 void BM_TimeInForceIocFok(benchmark::State& state) {
     static GoogleBenchBook book;
     static me::OrderID next_id = 20'000'000u;
@@ -207,6 +237,20 @@ void BM_ItchReplaceDecode(benchmark::State& state) {
     }
 }
 
+void BM_ItchDeleteDecode(benchmark::State& state) {
+    const RawItchMessage raw = make_delete(1'000u, 42u);
+    me::itch::ParsedMessage parsed{};
+
+    for (auto _ : state) {
+        const bool ok = me::itch::ItchParser::parse(raw.bytes.data(), raw.length, parsed);
+        benchmark::DoNotOptimize(parsed);
+        if (!ok) [[unlikely]] {
+            state.SkipWithError("ITCH delete parser returned false");
+            break;
+        }
+    }
+}
+
 void BM_AlphaSignalOfiVolQuoteRisk(benchmark::State& state) {
     me::alpha::OnlineSignals<> signals;
     const me::strategy::AvellanedaStoikovMarketMaker maker{};
@@ -247,9 +291,11 @@ void BM_AlphaSignalOfiVolQuoteRisk(benchmark::State& state) {
 BENCHMARK(BM_HotFifoFill);
 BENCHMARK(BM_AddCancelChurn);
 BENCHMARK(BM_ReplaceChurn);
+BENCHMARK(BM_DeleteChurn);
 BENCHMARK(BM_TimeInForceIocFok);
 BENCHMARK(BM_ItchAddDecode);
 BENCHMARK(BM_ItchReplaceDecode);
+BENCHMARK(BM_ItchDeleteDecode);
 BENCHMARK(BM_AlphaSignalOfiVolQuoteRisk);
 BENCHMARK_MAIN();
 
@@ -263,6 +309,7 @@ using ChurnBook = me::OrderBook<1u << 12u, 1u << 20u, 1u << 12u>;
 static std::array<std::uint64_t, kIterations> samples{};
 static std::array<RawItchMessage, kMessageRingSize> add_messages{};
 static std::array<RawItchMessage, kMessageRingSize> replace_messages{};
+static std::array<RawItchMessage, kMessageRingSize> delete_messages{};
 
 void initialize_add_messages() noexcept {
     static bool initialized = false;
@@ -292,6 +339,19 @@ void initialize_replace_messages() noexcept {
                                            static_cast<me::OrderID>(i + 1u + kMessageRingSize),
                                            100u + static_cast<me::Qty>(i & 127u),
                                            kAskPrice + static_cast<me::Price>(i & 255u));
+    }
+    initialized = true;
+}
+
+void initialize_delete_messages() noexcept {
+    static bool initialized = false;
+    if (initialized) {
+        return;
+    }
+
+    for (std::size_t i = 0; i < kMessageRingSize; ++i) {
+        delete_messages[i] = make_delete(static_cast<me::Timestamp>(3'000u + i),
+                                         static_cast<me::OrderID>(i + 1u));
     }
     initialized = true;
 }
@@ -380,6 +440,17 @@ bool run_replace_churn() {
     });
 }
 
+bool run_delete_churn() {
+    static ChurnBook book;
+    return run_scenario("delete_churn", 1u, [](const std::size_t i) noexcept {
+        const me::OrderID id = static_cast<me::OrderID>(40'000'000u + i);
+        const me::Price price = kAskPrice + static_cast<me::Price>(i & 1023u);
+        const me::BookStatus add_status = book.add_order(id, me::Side::Sell, price, 10u);
+        const me::BookStatus delete_status = book.delete_order(id);
+        return add_status == me::BookStatus::Accepted && delete_status == me::BookStatus::Filled;
+    });
+}
+
 bool run_time_in_force_ioc_fok() {
     static ChurnBook book;
     return run_scenario("time_in_force_ioc_fok", 1u, [](const std::size_t i) noexcept {
@@ -414,6 +485,16 @@ bool run_itch_replace_decode() {
         const RawItchMessage& raw = replace_messages[i & (kMessageRingSize - 1u)];
         return me::itch::ItchParser::parse(raw.bytes.data(), raw.length, parsed) &&
                parsed.kind == me::itch::MessageKind::OrderReplace;
+    });
+}
+
+bool run_itch_delete_decode() {
+    initialize_delete_messages();
+    return run_scenario("itch_delete_decode", kFastOpsPerSample, [](const std::size_t i) noexcept {
+        me::itch::ParsedMessage parsed{};
+        const RawItchMessage& raw = delete_messages[i & (kMessageRingSize - 1u)];
+        return me::itch::ItchParser::parse(raw.bytes.data(), raw.length, parsed) &&
+               parsed.kind == me::itch::MessageKind::OrderDelete;
     });
 }
 
@@ -464,9 +545,11 @@ int main() {
         run_hot_fifo_fill() &&
         run_add_cancel_churn() &&
         run_replace_churn() &&
+        run_delete_churn() &&
         run_time_in_force_ioc_fok() &&
         run_itch_add_decode() &&
         run_itch_replace_decode() &&
+        run_itch_delete_decode() &&
         run_alpha_signal_ofi_vol_quote_risk();
     return ok ? 0 : 1;
 }
